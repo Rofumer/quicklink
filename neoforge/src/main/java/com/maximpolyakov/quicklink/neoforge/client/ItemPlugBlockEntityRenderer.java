@@ -22,7 +22,6 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
 
     private static final float EPS = 0.001f;
 
-    // Белая текстура из атласа, которую мы тонируем цветом (и для квадрантов, и для рамки/креста)
     private static final ResourceLocation WHITE_TEX =
             ResourceLocation.fromNamespaceAndPath("minecraft", "block/white_wool");
 
@@ -32,11 +31,27 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
     private static final float COLOR_GAMMA = 0.80f; // 0.75..0.90
     // ============================
 
-    // ===== Role marker knobs =====
-    private static final float FRAME_THICK = 0.06f;   // толщина рамки в UV (0..1)
-    private static final float X_THICK     = 0.05f;   // толщина штриха креста
-    private static final float MARKER_ALPHA = 0.95f;  // прозрачность маркеров
+    // ===== Role frame knobs =====
+    private static final float FRAME_THICK = 0.035f;
+    private static final float FRAME_ALPHA = 0.95f;
+
+    // PLUG = orange
+    private static final float PLUG_R = 1.0f;
+    private static final float PLUG_G = 0.55f;
+    private static final float PLUG_B = 0.10f;
+
+    // POINT = green
+    private static final float POINT_R = 0.15f;
+    private static final float POINT_G = 1.00f;
+    private static final float POINT_B = 0.25f;
     // ============================
+
+    // ===== Disabled X knobs =====
+    private static final float X_THICK     = 0.05f; // толщина штриха X
+    private static final float X_ALPHA     = 0.95f;
+    private static final int   X_SEGMENTS  = 7;     // сколько штрихов на диагональ
+    private static final float X_GAP_RATIO = 0.35f; // доля “пустоты” внутри сегмента
+    // =============================
 
     public ItemPlugBlockEntityRenderer(BlockEntityRendererProvider.Context ctx) {}
 
@@ -44,9 +59,12 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
     public void render(ItemPlugBlockEntity be, float partialTick, PoseStack poseStack,
                        MultiBufferSource buffer, int packedLight, int packedOverlay) {
 
+        // ===== DIAGNOSTIC SWITCH =====
         final boolean DBG_FORCE_FULLBRIGHT = false;
+        // =============================
 
         VertexConsumer vc = buffer.getBuffer(RenderType.entityCutoutNoCull(InventoryMenu.BLOCK_ATLAS));
+
         TextureAtlasSprite sprite = Minecraft.getInstance()
                 .getTextureAtlas(InventoryMenu.BLOCK_ATLAS)
                 .apply(WHITE_TEX);
@@ -54,63 +72,53 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
         PoseStack.Pose pose = poseStack.last();
         Matrix4f mat = pose.pose();
 
-        // Цвет сети (квадранты)
-        byte[] c = be.getColors().toArray();
-        boolean allUnset = be.getColors().isAllUnset();
-
         float U0 = sprite.getU0(), U1 = sprite.getU1();
         float V0 = sprite.getV0(), V1 = sprite.getV1();
 
         int overlay = OverlayTexture.NO_OVERLAY;
 
-        int light;
-        if (DBG_FORCE_FULLBRIGHT) {
-            light = LightTexture.FULL_BRIGHT;
-        } else {
-            light = boostLight(packedLight, LIGHT_BOOST_BLOCK, LIGHT_BOOST_SKY);
+        int light = DBG_FORCE_FULLBRIGHT
+                ? LightTexture.FULL_BRIGHT
+                : boostLight(packedLight, LIGHT_BOOST_BLOCK, LIGHT_BOOST_SKY);
+
+        // 4 network colors
+        byte[] c = be.getColors().toArray();
+
+        // 1) Color quadrants (only where != UNSET)
+        if (!be.getColors().isAllUnset()) {
+            for (Direction face : Direction.values()) {
+                draw4QuadrantsSelective(vc, pose, mat, face, EPS, U0, U1, V0, V1, c, light, overlay);
+            }
         }
 
-        // Рисуем на всех гранях, где роль != NONE:
+        // 2) Role frames + disabled X
         for (Direction face : Direction.values()) {
             ItemPlugBlockEntity.SideRole role = be.getRole(face);
             if (role == ItemPlugBlockEntity.SideRole.NONE) continue;
 
-            boolean sideOn = be.isSideEnabled(face);
+            boolean on = be.isSideEnabled(face);
 
-            // 1) Квадранты сети (только если реально что-то покрашено)
-            if (!allUnset) {
-                draw4QuadrantsSelective(vc, pose, mat, face, EPS, U0, U1, V0, V1, c, light, overlay);
-            }
-
-            // 2) Рамка роли (PLUG/POINT)
-            if (role == ItemPlugBlockEntity.SideRole.PLUG) {
-                // оранжевая
-                drawFrame(vc, pose, mat, face, EPS,
-                        U0, U1, V0, V1,
-                        1.0f, 0.55f, 0.05f, MARKER_ALPHA,
-                        FRAME_THICK, light, overlay);
-            } else if (role == ItemPlugBlockEntity.SideRole.POINT) {
-                // зелёная
-                drawFrame(vc, pose, mat, face, EPS,
-                        U0, U1, V0, V1,
-                        0.10f, 1.0f, 0.20f, MARKER_ALPHA,
-                        FRAME_THICK, light, overlay);
-            }
-
-            // 3) Disabled: крест “X” поверх (если OFF)
-            if (!sideOn) {
-                // тёмно-серый крест, чтобы читалось поверх цвета
-                drawCrossX(vc, pose, mat, face, EPS,
-                        U0, U1, V0, V1,
-                        0.10f, 0.10f, 0.10f, 0.90f,
+            if (on) {
+                if (role == ItemPlugBlockEntity.SideRole.PLUG) {
+                    drawFrame(vc, pose, mat, face, EPS, U0, U1, V0, V1,
+                            PLUG_R, PLUG_G, PLUG_B, FRAME_ALPHA,
+                            FRAME_THICK, light, overlay);
+                } else { // POINT
+                    drawFrame(vc, pose, mat, face, EPS, U0, U1, V0, V1,
+                            POINT_R, POINT_G, POINT_B, FRAME_ALPHA,
+                            FRAME_THICK, light, overlay);
+                }
+            } else {
+                // disabled: red dashed X
+                drawCrossXDashedAxisAligned(vc, pose, mat, face, EPS, U0, U1, V0, V1,
+                        1.0f, 0.1f, 0.1f, X_ALPHA,
                         X_THICK, light, overlay);
             }
         }
     }
 
-    /**
-     * Рисуем 4 квадранта на одной грани, НО только те, что не UNSET.
-     */
+    // ---------------- Quadrants ----------------
+
     private static void draw4QuadrantsSelective(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
                                                 Direction face, float eps,
                                                 float U0, float U1, float V0, float V1,
@@ -130,19 +138,13 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
         }
     }
 
-    private static void drawQuadrantFlippedY(
-            VertexConsumer vc,
-            PoseStack.Pose pose,
-            Matrix4f mat,
-            Direction face,
-            float x0, float x1, float y0, float y1,
-            float eps,
-            float U0, float U1, float V0, float V1,
-            byte dyeId,
-            int light,
-            int overlay
-    ) {
-        // инверсия вертикали, чтобы “верх” действительно был сверху
+    private static void drawQuadrantFlippedY(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
+                                             Direction face,
+                                             float x0, float x1, float y0, float y1,
+                                             float eps,
+                                             float U0, float U1, float V0, float V1,
+                                             byte dyeId,
+                                             int light, int overlay) {
         float fy0 = 1f - y1;
         float fy1 = 1f - y0;
 
@@ -165,123 +167,128 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
         float g = ((rgb >> 8) & 0xFF) / 255f;
         float b = (rgb & 0xFF) / 255f;
 
-        // “Variant C”: лёгкое высветление цвета
         r = gammaLift(r, COLOR_GAMMA);
         g = gammaLift(g, COLOR_GAMMA);
         b = gammaLift(b, COLOR_GAMMA);
 
-        drawSolidRect(vc, pose, mat, face,
+        drawRectOnFace(vc, pose, mat, face, eps,
                 u0, u1, v0, v1,
-                eps, U0, U1, V0, V1,
+                U0, U1, V0, V1,
                 r, g, b, 1f,
                 light, overlay);
     }
 
-    /**
-     * Рамка по краям UV [0..1] с толщиной t.
-     */
+    // ---------------- Role frame ----------------
+
     private static void drawFrame(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
                                   Direction face, float eps,
                                   float U0, float U1, float V0, float V1,
                                   float r, float g, float b, float a,
-                                  float t,
+                                  float thick,
                                   int light, int overlay) {
 
-        float tClamped = clamp01(t);
-
         // top
-        drawSolidRect(vc, pose, mat, face, 0f, 1f, 0f, tClamped, eps, U0, U1, V0, V1, r,g,b,a, light, overlay);
+        drawRectOnFace(vc, pose, mat, face, eps,
+                0f, 1f, 0f, thick,
+                U0, U1, V0, V1, r, g, b, a, light, overlay);
+
         // bottom
-        drawSolidRect(vc, pose, mat, face, 0f, 1f, 1f - tClamped, 1f, eps, U0, U1, V0, V1, r,g,b,a, light, overlay);
+        drawRectOnFace(vc, pose, mat, face, eps,
+                0f, 1f, 1f - thick, 1f,
+                U0, U1, V0, V1, r, g, b, a, light, overlay);
+
         // left
-        drawSolidRect(vc, pose, mat, face, 0f, tClamped, 0f, 1f, eps, U0, U1, V0, V1, r,g,b,a, light, overlay);
+        drawRectOnFace(vc, pose, mat, face, eps,
+                0f, thick, 0f, 1f,
+                U0, U1, V0, V1, r, g, b, a, light, overlay);
+
         // right
-        drawSolidRect(vc, pose, mat, face, 1f - tClamped, 1f, 0f, 1f, eps, U0, U1, V0, V1, r,g,b,a, light, overlay);
+        drawRectOnFace(vc, pose, mat, face, eps,
+                1f - thick, 1f, 0f, 1f,
+                U0, U1, V0, V1, r, g, b, a, light, overlay);
     }
 
-    /**
-     * Крест X как две диагональные “полоски” в UV-плоскости.
-     */
-    private static void drawCrossX(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
-                                   Direction face, float eps,
-                                   float U0, float U1, float V0, float V1,
-                                   float r, float g, float b, float a,
-                                   float thickness,
-                                   int light, int overlay) {
+    // ---------------- Disabled: dashed X (axis-aligned) ----------------
 
-        float t = Math.max(0.01f, Math.min(0.25f, thickness));
+    private static void drawCrossXDashedAxisAligned(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
+                                                    Direction face, float eps,
+                                                    float U0, float U1, float V0, float V1,
+                                                    float r, float g, float b, float a,
+                                                    float thick,
+                                                    int light, int overlay) {
 
-        // Диагональ 1: (0,0) -> (1,1)
-        drawDiagStrip(vc, pose, mat, face, eps, U0, U1, V0, V1, r,g,b,a, light, overlay,
-                0f, 0f, 1f, 1f, t);
+        // diag 1: (0,0)->(1,1)
+        drawDashedDiagAxisAligned(vc, pose, mat, face, eps, U0, U1, V0, V1,
+                r,g,b,a, thick, light, overlay,
+                0f, 0f, 1f, 1f);
 
-        // Диагональ 2: (1,0) -> (0,1)
-        drawDiagStrip(vc, pose, mat, face, eps, U0, U1, V0, V1, r,g,b,a, light, overlay,
-                1f, 0f, 0f, 1f, t);
+        // diag 2: (1,0)->(0,1)
+        drawDashedDiagAxisAligned(vc, pose, mat, face, eps, U0, U1, V0, V1,
+                r,g,b,a, thick, light, overlay,
+                1f, 0f, 0f, 1f);
     }
 
-    /**
-     * Диагональная полоска (u0,v0)->(u1,v1) толщины t в UV.
-     */
-    private static void drawDiagStrip(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
-                                      Direction face, float eps,
-                                      float U0, float U1, float V0, float V1,
-                                      float r, float g, float b, float a,
-                                      int light, int overlay,
-                                      float uA, float vA, float uB, float vB,
-                                      float t) {
+    private static void drawDashedDiagAxisAligned(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
+                                                  Direction face, float eps,
+                                                  float U0, float U1, float V0, float V1,
+                                                  float r, float g, float b, float a,
+                                                  float thick,
+                                                  int light, int overlay,
+                                                  float uA, float vA, float uB, float vB) {
 
-        float dx = uB - uA;
-        float dy = vB - vA;
-        float len = (float) Math.sqrt(dx*dx + dy*dy);
-        if (len < 1e-6f) return;
+        int segs = Math.max(2, X_SEGMENTS);
+        float gapRatio = clamp01(X_GAP_RATIO);
 
-        // Перпендикуляр в UV
-        float px = -dy / len;
-        float py =  dx / len;
+        for (int i = 0; i < segs; i++) {
+            float t0 = (float) i / segs;
+            float t1 = (float) (i + 1) / segs;
 
-        float hu = px * (t * 0.5f);
-        float hv = py * (t * 0.5f);
+            // gap inside each segment
+            float len = t1 - t0;
+            float cut = len * gapRatio * 0.5f;
+            t0 += cut;
+            t1 -= cut;
+            if (t1 <= t0) continue;
 
-        // 4 угла полоски
-        float u1 = uA + hu, v1 = vA + hv;
-        float u2 = uB + hu, v2 = vB + hv;
-        float u3 = uB - hu, v3 = vB - hv;
-        float u4 = uA - hu, v4 = vA - hv;
+            float su0 = lerp(uA, uB, t0);
+            float sv0 = lerp(vA, vB, t0);
+            float su1 = lerp(uA, uB, t1);
+            float sv1 = lerp(vA, vB, t1);
 
-        // Текстурные UV (линейно)
-        float TU1 = lerp(U0, U1, u1), TV1 = lerp(V0, V1, v1);
-        float TU2 = lerp(U0, U1, u2), TV2 = lerp(V0, V1, v2);
-        float TU3 = lerp(U0, U1, u3), TV3 = lerp(V0, V1, v3);
-        float TU4 = lerp(U0, U1, u4), TV4 = lerp(V0, V1, v4);
+            // axis-aligned rectangle around the segment bbox + padding
+            float pad = thick * 0.5f;
 
-        float nx = face.getStepX();
-        float ny = face.getStepY();
-        float nz = face.getStepZ();
+            float uu0 = Math.min(su0, su1) - pad;
+            float uu1 = Math.max(su0, su1) + pad;
+            float vv0 = Math.min(sv0, sv1) - pad;
+            float vv1 = Math.max(sv0, sv1) + pad;
 
-        // Конвертим UV->XYZ для этой грани и кидаем 4 вершины
-        float[] p1 = uvToFaceXYZ(face, u1, v1, eps);
-        float[] p2 = uvToFaceXYZ(face, u2, v2, eps);
-        float[] p3 = uvToFaceXYZ(face, u3, v3, eps);
-        float[] p4 = uvToFaceXYZ(face, u4, v4, eps);
+            uu0 = clamp01(uu0);
+            uu1 = clamp01(uu1);
+            vv0 = clamp01(vv0);
+            vv1 = clamp01(vv1);
 
-        v(vc, pose, mat, p1[0], p1[1], p1[2], TU1, TV1, r,g,b,a, nx,ny,nz, light, overlay);
-        v(vc, pose, mat, p2[0], p2[1], p2[2], TU2, TV2, r,g,b,a, nx,ny,nz, light, overlay);
-        v(vc, pose, mat, p3[0], p3[1], p3[2], TU3, TV3, r,g,b,a, nx,ny,nz, light, overlay);
-        v(vc, pose, mat, p4[0], p4[1], p4[2], TU4, TV4, r,g,b,a, nx,ny,nz, light, overlay);
+            drawRectOnFace(vc, pose, mat, face, eps,
+                    uu0, uu1, vv0, vv1,
+                    U0, U1, V0, V1,
+                    r, g, b, a,
+                    light, overlay);
+        }
     }
 
-    /**
-     * Прямоугольник в UV-координатах (оси-aligned) на выбранной грани.
-     * u,v в диапазоне [0..1].
-     */
-    private static void drawSolidRect(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
-                                      Direction face,
-                                      float u0, float u1, float v0, float v1,
-                                      float eps,
-                                      float U0, float U1, float V0, float V1,
-                                      float r, float g, float b, float a,
-                                      int light, int overlay) {
+    // ---------------- Core: draw rect on a face ----------------
+
+    private static void drawRectOnFace(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
+                                       Direction face, float eps,
+                                       float u0, float u1, float v0, float v1,
+                                       float U0, float U1, float V0, float V1,
+                                       float r, float g, float b, float a,
+                                       int light, int overlay) {
+
+        float uu0 = Math.min(u0, u1);
+        float uu1 = Math.max(u0, u1);
+        float vv0 = Math.min(v0, v1);
+        float vv1 = Math.max(v0, v1);
 
         float nx = face.getStepX();
         float ny = face.getStepY();
@@ -289,54 +296,32 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
 
         switch (face) {
             case SOUTH -> quad(vc, pose, mat, nx, ny, nz,
-                    u0, v0, 1f + eps,  u1, v0, 1f + eps,  u1, v1, 1f + eps,  u0, v1, 1f + eps,
-                    lerp(U0, U1, u0), lerp(V0, V1, v0),
-                    lerp(U0, U1, u1), lerp(V0, V1, v1),
-                    r, g, b, a, light, overlay);
+                    uu0, vv0, 1f + eps,  uu1, vv0, 1f + eps,  uu1, vv1, 1f + eps,  uu0, vv1, 1f + eps,
+                    U0, V0, U1, V1, r, g, b, a, light, overlay);
 
             case NORTH -> quad(vc, pose, mat, nx, ny, nz,
-                    1f - u0, v0, -eps,  1f - u1, v0, -eps,  1f - u1, v1, -eps,  1f - u0, v1, -eps,
-                    lerp(U0, U1, u0), lerp(V0, V1, v0),
-                    lerp(U0, U1, u1), lerp(V0, V1, v1),
-                    r, g, b, a, light, overlay);
+                    1f - uu0, vv0, -eps,  1f - uu1, vv0, -eps,  1f - uu1, vv1, -eps,  1f - uu0, vv1, -eps,
+                    U0, V0, U1, V1, r, g, b, a, light, overlay);
 
             case EAST -> quad(vc, pose, mat, nx, ny, nz,
-                    1f + eps, v0, 1f - u0,  1f + eps, v0, 1f - u1,  1f + eps, v1, 1f - u1,  1f + eps, v1, 1f - u0,
-                    lerp(U0, U1, u0), lerp(V0, V1, v0),
-                    lerp(U0, U1, u1), lerp(V0, V1, v1),
-                    r, g, b, a, light, overlay);
+                    1f + eps, vv0, 1f - uu0,  1f + eps, vv0, 1f - uu1,  1f + eps, vv1, 1f - uu1,  1f + eps, vv1, 1f - uu0,
+                    U0, V0, U1, V1, r, g, b, a, light, overlay);
 
             case WEST -> quad(vc, pose, mat, nx, ny, nz,
-                    -eps, v0, u0,  -eps, v0, u1,  -eps, v1, u1,  -eps, v1, u0,
-                    lerp(U0, U1, u0), lerp(V0, V1, v0),
-                    lerp(U0, U1, u1), lerp(V0, V1, v1),
-                    r, g, b, a, light, overlay);
+                    -eps, vv0, uu0,  -eps, vv0, uu1,  -eps, vv1, uu1,  -eps, vv1, uu0,
+                    U0, V0, U1, V1, r, g, b, a, light, overlay);
 
             case UP -> quad(vc, pose, mat, nx, ny, nz,
-                    u0, 1f + eps, 1f - v0,  u1, 1f + eps, 1f - v0,  u1, 1f + eps, 1f - v1,  u0, 1f + eps, 1f - v1,
-                    lerp(U0, U1, u0), lerp(V0, V1, v0),
-                    lerp(U0, U1, u1), lerp(V0, V1, v1),
-                    r, g, b, a, light, overlay);
+                    uu0, 1f + eps, 1f - vv0,  uu1, 1f + eps, 1f - vv0,  uu1, 1f + eps, 1f - vv1,  uu0, 1f + eps, 1f - vv1,
+                    U0, V0, U1, V1, r, g, b, a, light, overlay);
 
             case DOWN -> quad(vc, pose, mat, nx, ny, nz,
-                    u0, -eps, v0,  u1, -eps, v0,  u1, -eps, v1,  u0, -eps, v1,
-                    lerp(U0, U1, u0), lerp(V0, V1, v0),
-                    lerp(U0, U1, u1), lerp(V0, V1, v1),
-                    r, g, b, a, light, overlay);
+                    uu0, -eps, vv0,  uu1, -eps, vv0,  uu1, -eps, vv1,  uu0, -eps, vv1,
+                    U0, V0, U1, V1, r, g, b, a, light, overlay);
         }
     }
 
-    private static float[] uvToFaceXYZ(Direction face, float u, float v, float eps) {
-        // u,v в [0..1]
-        return switch (face) {
-            case SOUTH -> new float[]{u, v, 1f + eps};
-            case NORTH -> new float[]{1f - u, v, -eps};
-            case EAST  -> new float[]{1f + eps, v, 1f - u};
-            case WEST  -> new float[]{-eps, v, u};
-            case UP    -> new float[]{u, 1f + eps, 1f - v};
-            case DOWN  -> new float[]{u, -eps, v};
-        };
-    }
+    // ---------------- Low-level quad ----------------
 
     private static void quad(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
                              float nx, float ny, float nz,
@@ -368,6 +353,8 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
                 .setNormal(pose, nx, ny, nz);
     }
 
+    // ---------------- Utils ----------------
+
     private static int boostLight(int packedLight, int addBlock, int addSky) {
         if (addBlock <= 0 && addSky <= 0) return packedLight;
 
@@ -391,9 +378,9 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
         return a + (b - a) * t;
     }
 
-    private static float clamp01(float v) {
-        if (v < 0f) return 0f;
-        if (v > 1f) return 1f;
-        return v;
+    private static float clamp01(float x) {
+        if (x < 0f) return 0f;
+        if (x > 1f) return 1f;
+        return x;
     }
 }
