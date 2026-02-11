@@ -8,6 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
@@ -322,11 +323,24 @@ public class ItemPlugBlockEntity extends BlockEntity {
     public void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.loadAdditional(tag, registries);
 
-        colors = QuickLinkColors.unpack(tag.getInt(QuickLinkNbt.COLORS));
-        side = Direction.from3DDataValue(tag.getByte(QuickLinkNbt.SIDE));
-        enabled = tag.getBoolean(QuickLinkNbt.ENABLED);
+        int defaultPackedColors = QuickLinkColors.unset().pack();
+        colors = QuickLinkColors.unpack(tag.contains(QuickLinkNbt.COLORS, Tag.TAG_INT)
+                ? tag.getInt(QuickLinkNbt.COLORS)
+                : defaultPackedColors);
 
-        mode = Mode.fromId(tag.getByte("ql_mode"));
-        rrIndex = tag.getInt("ql_rr");
+        side = tag.contains(QuickLinkNbt.SIDE, Tag.TAG_BYTE)
+                ? Direction.from3DDataValue(tag.getByte(QuickLinkNbt.SIDE))
+                : Direction.NORTH;
+
+        enabled = !tag.contains(QuickLinkNbt.ENABLED, Tag.TAG_BYTE)
+                || tag.getBoolean(QuickLinkNbt.ENABLED);
+
+        mode = tag.contains("ql_mode", Tag.TAG_BYTE)
+                ? Mode.fromId(tag.getByte("ql_mode"))
+                : Mode.PLUG;
+
+        rrIndex = tag.contains("ql_rr", Tag.TAG_INT)
+                ? tag.getInt("ql_rr")
+                : 0;
     }
 }
