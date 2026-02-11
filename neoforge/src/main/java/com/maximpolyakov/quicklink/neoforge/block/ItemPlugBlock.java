@@ -1,5 +1,6 @@
 package com.maximpolyakov.quicklink.neoforge.block;
 
+import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
 import com.maximpolyakov.quicklink.neoforge.blockentity.ItemPlugBlockEntity;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
@@ -7,7 +8,6 @@ import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.ItemInteractionResult;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.DyeItem;
 import net.minecraft.world.item.ItemStack;
@@ -45,88 +45,80 @@ public class ItemPlugBlock extends BaseEntityBlock {
         return new ItemPlugBlockEntity(pos, state);
     }
 
-    // ======= TICKER =======
     @Nullable
     @Override
     public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
         if (level.isClientSide) return null;
-
-        // безопасная проверка типа (NeoForge)
-        return (lvl, pos, st, be) -> {
-            if (be instanceof ItemPlugBlockEntity ql) {
-                ItemPlugBlockEntity.serverTick(lvl, pos, st, ql);
-            }
-        };
+        return createTickerHelper(type, QuickLinkNeoForge.ITEM_PLUG_BE.get(), ItemPlugBlockEntity::serverTick);
     }
 
-    // ======= EMPTY HAND USE (mode/side) =======
-    @Override
-    protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos,
-                                               Player player, BlockHitResult hit) {
-
-        if (level.isClientSide) return InteractionResult.SUCCESS;
-
-        BlockEntity be = level.getBlockEntity(pos);
-        if (!(be instanceof ItemPlugBlockEntity plug)) return InteractionResult.PASS;
-
-        boolean shift = player.isShiftKeyDown();
-
-        if (shift) {
-            // shift+ПКМ: крутим сторону по циклу
-            Direction next = nextSide(plug.getSide());
-            plug.setSide(next);
-            player.displayClientMessage(Component.literal("Side: " + next.getName()), true);
-        } else {
-            // ПКМ пустой рукой: PLUG/POINT
-            plug.toggleMode();
-            player.displayClientMessage(Component.literal("Mode: " + plug.getMode().name()), true);
-        }
-
-        return InteractionResult.CONSUME;
-    }
-
-    private static Direction nextSide(Direction d) {
-        // простой цикл: NORTH -> EAST -> SOUTH -> WEST -> UP -> DOWN -> NORTH ...
-        return switch (d) {
-            case NORTH -> Direction.EAST;
-            case EAST -> Direction.SOUTH;
-            case SOUTH -> Direction.WEST;
-            case WEST -> Direction.UP;
-            case UP -> Direction.DOWN;
-            case DOWN -> Direction.NORTH;
-        };
-    }
-
-    // ======= DYE USE (as you had) =======
     @Override
     public ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos,
                                            Player player, InteractionHand hand, BlockHitResult hit) {
 
+        // client: optimistic success for interactions we handle (server applies real change)
+        if (level.isClientSide) {
+            // if dye OR empty-hand -> we handle it
+            if (stack.getItem() instanceof DyeItem || stack.isEmpty()) {
+                return ItemInteractionResult.SUCCESS;
+            }
+            return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
+        }
+
+        BlockEntity be0 = level.getBlockEntity(pos);
+        if (!(be0 instanceof ItemPlugBlockEntity be)) {
+            return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
+        }
+
+        Direction face = hit.getDirection();
+
+        // 1) Empty hand: roles / enable per clicked face
+        if (stack.isEmpty()) {
+            if (player.isShiftKeyDown()) {
+                boolean toggled = be.toggleSideEnabled(face);
+                if (!toggled) {
+                    player.sendSystemMessage(Component.literal("Side " + face + ": NONE"));
+                } else {
+                    var role = be.getRole(face);
+                    boolean on = be.isSideEnabled(face);
+                    player.sendSystemMessage(Component.literal("Side " + face + ": " + role + " (" + (on ? "ON" : "OFF") + ")"));
+                }
+            } else {
+                var role = be.cycleRole(face);
+                boolean on = (role != ItemPlugBlockEntity.SideRole.NONE) && be.isSideEnabled(face);
+                player.sendSystemMessage(Component.literal("Side " + face + ": " + role + (role == ItemPlugBlockEntity.SideRole.NONE ? "" : (" (" + (on ? "ON" : "OFF") + ")"))));
+            }
+            return ItemInteractionResult.CONSUME;
+        }
+
+        // 2) Dye: paint quadrant on clicked face (network colors)
         if (!(stack.getItem() instanceof DyeItem dye)) {
             return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
         }
 
-        if (level.isClientSide) {
-            return ItemInteractionResult.SUCCESS;
-        }
-
-        BlockEntity be = level.getBlockEntity(pos);
-        if (!(be instanceof ItemPlugBlockEntity plug)) {
-            return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
-        }
-
+        // Local hit coords in [0..1)
         double lx = hit.getLocation().x - pos.getX();
         double ly = hit.getLocation().y - pos.getY();
         double lz = hit.getLocation().z - pos.getZ();
 
-        int slot = quadSlotFromHit(hit.getDirection(), lx, ly, lz);
-        byte colorId = (byte) dye.getDyeColor().getId();
+        int slot = quadSlotFromHit(face, lx, ly, lz);
+        byte colorId = (byte) dye.getDyeColor().getId(); // 0..15
+        be.setColor(slot, colorId);
 
-        plug.setColor(slot, colorId);
+        // Optional: consume dye in survival
+        // if (!player.getAbilities().instabuild) stack.shrink(1);
 
         return ItemInteractionResult.CONSUME;
     }
 
+    /**
+     * Determine which of 4 quadrants on the clicked face was hit.
+     * Local coords are in [0..1) for each axis.
+     *
+     * Slots:
+     * 0 = top-left,  1 = top-right
+     * 2 = bottom-left, 3 = bottom-right
+     */
     private static int quadSlotFromHit(Direction face, double lx, double ly, double lz) {
         double u, v;
 
@@ -141,7 +133,7 @@ public class ItemPlugBlock extends BaseEntityBlock {
         }
 
         int col = (u < 0.5) ? 0 : 1;
-        int rowFromTop = (v >= 0.5) ? 0 : 1;
+        int rowFromTop = (v >= 0.5) ? 0 : 1; // upper half => top row
         return rowFromTop * 2 + col;
     }
 }

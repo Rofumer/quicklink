@@ -10,7 +10,7 @@ public class QuickLinkNetworkManager extends SavedData {
 
     private static final String DATA_NAME = "quicklink_network_mgr";
 
-    // key -> plugs/points
+    // key -> plugs/points positions
     private final Map<Integer, Set<BlockPos>> plugsByKey = new HashMap<>();
     private final Map<Integer, Set<BlockPos>> pointsByKey = new HashMap<>();
 
@@ -47,29 +47,38 @@ public class QuickLinkNetworkManager extends SavedData {
         if (set.isEmpty()) pointsByKey.remove(key);
     }
 
-    // -------- snapshots --------
-
+    /**
+     * Snapshot PLUG positions by key.
+     * Sorted for stable round-robin.
+     */
     public List<BlockPos> getPlugsSnapshot(int key) {
         Set<BlockPos> set = plugsByKey.get(key);
         if (set == null || set.isEmpty()) return Collections.emptyList();
 
         ArrayList<BlockPos> out = new ArrayList<>(set);
-        out.sort(Comparator
-                .comparingInt((BlockPos p) -> p.getX())
-                .thenComparingInt((BlockPos p) -> p.getY())
-                .thenComparingInt((BlockPos p) -> p.getZ()));
+        out.sort((a, b) -> {
+            int c = Integer.compare(a.getX(), b.getX());
+            if (c != 0) return c;
+            c = Integer.compare(a.getY(), b.getY());
+            if (c != 0) return c;
+            return Integer.compare(a.getZ(), b.getZ());
+        });
         return out;
     }
 
+    // (optional) if you ever need it
     public List<BlockPos> getPointsSnapshot(int key) {
         Set<BlockPos> set = pointsByKey.get(key);
         if (set == null || set.isEmpty()) return Collections.emptyList();
 
         ArrayList<BlockPos> out = new ArrayList<>(set);
-        out.sort(Comparator
-                .comparingInt((BlockPos p) -> p.getX())
-                .thenComparingInt((BlockPos p) -> p.getY())
-                .thenComparingInt((BlockPos p) -> p.getZ()));
+        out.sort((a, b) -> {
+            int c = Integer.compare(a.getX(), b.getX());
+            if (c != 0) return c;
+            c = Integer.compare(a.getY(), b.getY());
+            if (c != 0) return c;
+            return Integer.compare(a.getZ(), b.getZ());
+        });
         return out;
     }
 

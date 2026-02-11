@@ -2,6 +2,7 @@ package com.maximpolyakov.quicklink.neoforge.client;
 
 import com.maximpolyakov.quicklink.QuickLinkColors;
 import com.maximpolyakov.quicklink.neoforge.blockentity.ItemPlugBlockEntity;
+import com.maximpolyakov.quicklink.neoforge.blockentity.ItemPlugBlockEntity.SideRole;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
@@ -22,16 +23,13 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
 
     private static final float EPS = 0.001f;
 
-    // White texture from block atlas; we tint it.
     private static final ResourceLocation WHITE_TEX =
             ResourceLocation.fromNamespaceAndPath("minecraft", "block/white_wool");
 
     // ===== “Variant C” knobs =====
-    // Поднимаем lightmap на N пунктов (0..15). 0 = выключено.
-    private static final int LIGHT_BOOST_BLOCK = 5; // попробуй 4..8
-    private static final int LIGHT_BOOST_SKY   = 2; // попробуй 1..5
-    // Нелинейное “высветление” цвета. 1.0 = выключено, меньше = ярче.
-    private static final float COLOR_GAMMA = 0.80f; // 0.75..0.90 обычно ок
+    private static final int LIGHT_BOOST_BLOCK = 5;
+    private static final int LIGHT_BOOST_SKY   = 2;
+    private static final float COLOR_GAMMA = 0.80f;
     // ============================
 
     public ItemPlugBlockEntityRenderer(BlockEntityRendererProvider.Context ctx) {}
@@ -40,13 +38,10 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
     public void render(ItemPlugBlockEntity be, float partialTick, PoseStack poseStack,
                        MultiBufferSource buffer, int packedLight, int packedOverlay) {
 
-        // ===== DIAGNOSTIC SWITCHES =====
-        final boolean DBG_LOG_EVERY_2S = false;
-        final boolean DBG_FORCE_FULLBRIGHT = false; // только для отладки
-        final boolean DBG_DRAW_ALL_FACES = false;   // обычно false: рисуем только на be.getSide()
-        // =================================
+        final boolean DBG_DRAW_ALL_FACES = false;
+        final boolean DBG_FORCE_FULLBRIGHT = false;
 
-        // Если вообще ничего не покрашено — не рисуем оверлей (блок остаётся камнем).
+        // Если вообще ничего не покрашено — не рисуем оверлей
         if (be.getColors().isAllUnset()) {
             return;
         }
@@ -60,81 +55,56 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
         PoseStack.Pose pose = poseStack.last();
         Matrix4f mat = pose.pose();
 
-        // 4 цвета (TL, TR, BL, BR) — из BE/NBT
         byte[] c = be.getColors().toArray();
-
-        // выбранная сторона
-        Direction face = be.getSide();
 
         float U0 = sprite.getU0(), U1 = sprite.getU1();
         float V0 = sprite.getV0(), V1 = sprite.getV1();
 
         int overlay = OverlayTexture.NO_OVERLAY;
 
-        int light;
-        if (DBG_FORCE_FULLBRIGHT) {
-            light = LightTexture.FULL_BRIGHT;
-        } else {
-            // Вариант C: берём реальный packedLight, но “чуть поднимаем”
-            light = boostLight(packedLight, LIGHT_BOOST_BLOCK, LIGHT_BOOST_SKY);
-        }
+        int light = DBG_FORCE_FULLBRIGHT
+                ? LightTexture.FULL_BRIGHT
+                : boostLight(packedLight, LIGHT_BOOST_BLOCK, LIGHT_BOOST_SKY);
 
-        if (DBG_LOG_EVERY_2S && Minecraft.getInstance().player != null) {
-            int t = Minecraft.getInstance().player.tickCount;
-            if ((t % 40) == 0) {
-                System.out.println("[QuickLink][BER] pos=" + be.getBlockPos()
-                        + " side=" + face
-                        + " colors=" + java.util.Arrays.toString(c)
-                        + " packedLight=0x" + Integer.toHexString(packedLight)
-                        + " usingLight=0x" + Integer.toHexString(light));
-            }
-        }
+        for (Direction face : Direction.values()) {
 
-        if (DBG_DRAW_ALL_FACES) {
-            for (Direction d : Direction.values()) {
-                draw4QuadrantsSelective(vc, pose, mat, d, EPS, U0, U1, V0, V1, c, light, overlay);
+            if (!DBG_DRAW_ALL_FACES) {
+                SideRole role = be.getRole(face);
+                if (role == SideRole.NONE) continue;
+                if (!be.isSideEnabled(face)) continue;
             }
-        } else {
+
             draw4QuadrantsSelective(vc, pose, mat, face, EPS, U0, U1, V0, V1, c, light, overlay);
         }
     }
 
-    /**
-     * Рисуем 4 квадранта на одной грани, НО только те, что не UNSET.
-     * Это важно, чтобы “непокрашенные” не становились чёрными/тусклыми.
-     */
     private static void draw4QuadrantsSelective(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
                                                 Direction face, float eps,
                                                 float U0, float U1, float V0, float V1,
                                                 byte[] c, int light, int overlay) {
 
-        if (c[0] != QuickLinkColors.UNSET) {
+        if (c[0] != QuickLinkColors.UNSET)
             drawQuadrantFlippedY(vc, pose, mat, face, 0f, 0.5f, 0f, 0.5f, eps, U0, U1, V0, V1, c[0], light, overlay);
-        }
-        if (c[1] != QuickLinkColors.UNSET) {
+
+        if (c[1] != QuickLinkColors.UNSET)
             drawQuadrantFlippedY(vc, pose, mat, face, 0.5f, 1f, 0f, 0.5f, eps, U0, U1, V0, V1, c[1], light, overlay);
-        }
-        if (c[2] != QuickLinkColors.UNSET) {
+
+        if (c[2] != QuickLinkColors.UNSET)
             drawQuadrantFlippedY(vc, pose, mat, face, 0f, 0.5f, 0.5f, 1f, eps, U0, U1, V0, V1, c[2], light, overlay);
-        }
-        if (c[3] != QuickLinkColors.UNSET) {
+
+        if (c[3] != QuickLinkColors.UNSET)
             drawQuadrantFlippedY(vc, pose, mat, face, 0.5f, 1f, 0.5f, 1f, eps, U0, U1, V0, V1, c[3], light, overlay);
-        }
     }
 
-    private static void drawQuadrantFlippedY(
-            VertexConsumer vc,
-            PoseStack.Pose pose,
-            Matrix4f mat,
-            Direction face,
-            float x0, float x1, float y0, float y1,
-            float eps,
-            float U0, float U1, float V0, float V1,
-            byte dyeId,
-            int light,
-            int overlay
-    ) {
-        // инверсия вертикали, чтобы “верх” действительно был сверху
+    private static void drawQuadrantFlippedY(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
+                                             Direction face,
+                                             float x0, float x1, float y0, float y1,
+                                             float eps,
+                                             float U0, float U1, float V0, float V1,
+                                             byte dyeId,
+                                             int light,
+                                             int overlay) {
+
         float fy0 = 1f - y1;
         float fy1 = 1f - y0;
 
@@ -153,14 +123,9 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
                                      int light, int overlay) {
 
         int rgb = DyeColor.byId(dyeId & 0xFF).getFireworkColor();
-        float r = ((rgb >> 16) & 0xFF) / 255f;
-        float g = ((rgb >> 8) & 0xFF) / 255f;
-        float b = (rgb & 0xFF) / 255f;
-
-        // Вариант C: “чуть поднять” сам цвет (gamma-like)
-        r = gammaLift(r, COLOR_GAMMA);
-        g = gammaLift(g, COLOR_GAMMA);
-        b = gammaLift(b, COLOR_GAMMA);
+        float r = gammaLift(((rgb >> 16) & 0xFF) / 255f, COLOR_GAMMA);
+        float g = gammaLift(((rgb >> 8) & 0xFF) / 255f, COLOR_GAMMA);
+        float b = gammaLift((rgb & 0xFF) / 255f, COLOR_GAMMA);
 
         float a = 1f;
 
@@ -225,27 +190,17 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
                 .setNormal(pose, nx, ny, nz);
     }
 
-    /**
-     * Поднимаем упакованный lightmap:
-     * block/sky — по 0..15, просто добавляем и clamp.
-     */
     private static int boostLight(int packedLight, int addBlock, int addSky) {
-        if (addBlock <= 0 && addSky <= 0) return packedLight;
-
         int block = LightTexture.block(packedLight);
         int sky = LightTexture.sky(packedLight);
 
-        block = Math.min(15, block + Math.max(0, addBlock));
-        sky = Math.min(15, sky + Math.max(0, addSky));
+        block = Math.min(15, block + addBlock);
+        sky = Math.min(15, sky + addSky);
 
         return LightTexture.pack(block, sky);
     }
 
-    /**
-     * gamma < 1 => светлее. 1 => без изменений.
-     */
     private static float gammaLift(float c, float gamma) {
-        if (gamma >= 0.999f) return c;
         if (c <= 0f) return 0f;
         if (c >= 1f) return 1f;
         return (float) Math.pow(c, gamma);

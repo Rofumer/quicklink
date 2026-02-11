@@ -23,69 +23,71 @@ import java.util.List;
 
 public class ItemPlugBlockEntity extends BlockEntity {
 
-    public enum Mode {
-        PLUG((byte) 0),
-        POINT((byte) 1);
+    // ---- per-side roles ----
+    // we store 6-bit masks by Direction.get3DDataValue():
+    // DOWN=0, UP=1, NORTH=2, SOUTH=3, WEST=4, EAST=5
+    private int plugMask = 0;      // sides that act as PLUG (source)
+    private int pointMask = 0;     // sides that act as POINT (sink)
+    private int disabledMask = 0;  // sides that are OFF (if role != NONE)
 
-        public final byte id;
-        Mode(byte id) { this.id = id; }
+    // round-robin index per POINT side (0..5)
+    private final int[] rrIndexBySide = new int[6];
 
-        public static Mode fromId(byte id) {
-            return (id == 1) ? POINT : PLUG;
-        }
-    }
-
+    // network key
     private QuickLinkColors colors = QuickLinkColors.unset();
 
-    // Грань, на которой рисуем и куда "ориентирован" блок (мы используем её же как направление подключения)
-    private Direction side = Direction.NORTH;
-
+    // global enable (master switch for the whole BE)
     private boolean enabled = true;
-    private Mode mode = Mode.PLUG;
 
-    // round-robin индекс для POINT
-    private int rrIndex = 0;
-
-    // кеш для корректной перерегистрации в менеджере
+    // cached registration state (for clean unregister)
     private int lastRegKey = Integer.MIN_VALUE;
-    private Mode lastRegMode = null;
+    private boolean lastRegHadPlug = false;
+    private boolean lastRegHadPoint = false;
 
     public ItemPlugBlockEntity(BlockPos pos, BlockState state) {
         super(QuickLinkNeoForge.ITEM_PLUG_BE.get(), pos, state);
     }
 
-    // ---------------- getters/setters ----------------
+    // ---------------- helpers ----------------
 
-    public Direction getSide() { return side; }
-    public void setSide(Direction side) {
-        this.side = (side == null) ? Direction.NORTH : side;
-        setChangedAndSync();
+    private static int bit(Direction d) {
+        int idx = d.get3DDataValue();
+        if (idx < 0) idx = 0;
+        if (idx > 5) idx = 5;
+        return 1 << idx;
     }
 
-    public boolean isEnabled() { return enabled; }
-    public void setEnabled(boolean enabled) {
-        this.enabled = enabled;
-        setChangedAndSync();
+    private static int clampMask6(int m) {
+        return m & 0b111111;
     }
 
-    public Mode getMode() { return mode; }
-    public void setMode(Mode mode) {
-        if (mode == null) mode = Mode.PLUG;
-        this.mode = mode;
-        setChangedAndSync();
-        syncRegistration(); // важно: PLUG<->POINT меняет реестр
+    private static int dirIndex(Direction d) {
+        int idx = d.get3DDataValue();
+        if (idx < 0) idx = 0;
+        if (idx > 5) idx = 5;
+        return idx;
     }
+
+    // ---------------- public API for block/use() ----------------
 
     public QuickLinkColors getColors() { return colors; }
 
     public void setColors(QuickLinkColors colors) {
         this.colors = (colors == null) ? QuickLinkColors.unset() : colors;
         setChangedAndSync();
-        syncRegistration(); // важно: ключ сети меняется
+        syncRegistration();
     }
 
     public int getNetworkKey() {
         return colors.networkKey();
+    }
+
+    public boolean isEnabled() { return enabled; }
+
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+        setChangedAndSync();
+        // registration does not depend on enabled (master switch)
     }
 
     public void setColor(int slot, byte colorId) {
@@ -93,7 +95,6 @@ public class ItemPlugBlockEntity extends BlockEntity {
         colors = colors.with(slot, colorId);
         setChangedAndSync();
 
-        // если ключ поменялся — перерегистрируем
         if (oldKey != getNetworkKey()) {
             syncRegistration();
         }
@@ -104,16 +105,95 @@ public class ItemPlugBlockEntity extends BlockEntity {
         }
     }
 
-    public void toggleMode() {
-        setMode(this.mode == Mode.PLUG ? Mode.POINT : Mode.PLUG);
+    public enum SideRole { NONE, PLUG, POINT }
+
+    public SideRole getRole(Direction side) {
+        int b = bit(side);
+        boolean p = (plugMask & b) != 0;
+        boolean t = (pointMask & b) != 0;
+
+        // invariant: we never allow both at same time for same side
+        if (p) return SideRole.PLUG;
+        if (t) return SideRole.POINT;
+        return SideRole.NONE;
     }
 
-    // ---------------- lifecycle / networking ----------------
+    public boolean isSideEnabled(Direction side) {
+        int b = bit(side);
+        return (disabledMask & b) == 0;
+    }
+
+    public boolean isPlugEnabled(Direction side) {
+        return getRole(side) == SideRole.PLUG && isSideEnabled(side);
+    }
+
+    public boolean isPointEnabled(Direction side) {
+        return getRole(side) == SideRole.POINT && isSideEnabled(side);
+    }
+
+    /**
+     * Cycle role for the clicked side:
+     * NONE -> PLUG -> POINT -> NONE
+     */
+    public SideRole cycleRole(Direction side) {
+        SideRole cur = getRole(side);
+        SideRole next = switch (cur) {
+            case NONE -> SideRole.PLUG;
+            case PLUG -> SideRole.POINT;
+            case POINT -> SideRole.NONE;
+        };
+
+        int b = bit(side);
+
+        // clear both bits first
+        plugMask &= ~b;
+        pointMask &= ~b;
+
+        if (next == SideRole.PLUG) {
+            plugMask |= b;
+        } else if (next == SideRole.POINT) {
+            pointMask |= b;
+        } else {
+            // NONE: also clear disabled flag (cos nothing to disable)
+            disabledMask &= ~b;
+        }
+
+        plugMask = clampMask6(plugMask);
+        pointMask = clampMask6(pointMask);
+        disabledMask = clampMask6(disabledMask);
+
+        setChangedAndSync();
+        syncRegistration();
+        return next;
+    }
+
+    /**
+     * Toggle ON/OFF only for that side. If side role is NONE -> do nothing (return false).
+     * Returns true if toggled.
+     */
+    public boolean toggleSideEnabled(Direction side) {
+        if (getRole(side) == SideRole.NONE) {
+            return false;
+        }
+        int b = bit(side);
+        disabledMask ^= b;
+        disabledMask = clampMask6(disabledMask);
+
+        setChangedAndSync();
+        syncRegistration(); // because effective plug/point presence can become 0
+        return true;
+    }
+
+    /** For debug/UI/render later */
+    public int getPlugMask() { return plugMask; }
+    public int getPointMask() { return pointMask; }
+    public int getDisabledMask() { return disabledMask; }
+
+    // ---------------- lifecycle / syncing ----------------
 
     private void setChangedAndSync() {
         setChanged();
         if (level != null && !level.isClientSide) {
-            // это важно для клиента/рендера
             level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
         }
     }
@@ -134,37 +214,64 @@ public class ItemPlugBlockEntity extends BlockEntity {
         super.setRemoved();
     }
 
+    private boolean hasAnyEffectivePlug() {
+        return (plugMask & ~disabledMask) != 0;
+    }
+
+    private boolean hasAnyEffectivePoint() {
+        return (pointMask & ~disabledMask) != 0;
+    }
+
     private void unregisterFromManager() {
         if (!(level instanceof ServerLevel sl)) return;
-        if (lastRegMode == null || lastRegKey == Integer.MIN_VALUE) return;
+        if (lastRegKey == Integer.MIN_VALUE) return;
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
-        if (lastRegMode == Mode.PLUG) mgr.unregisterPlug(lastRegKey, worldPosition);
-        else mgr.unregisterPoint(lastRegKey, worldPosition);
+
+        if (lastRegHadPlug) mgr.unregisterPlug(lastRegKey, worldPosition);
+        if (lastRegHadPoint) mgr.unregisterPoint(lastRegKey, worldPosition);
 
         lastRegKey = Integer.MIN_VALUE;
-        lastRegMode = null;
+        lastRegHadPlug = false;
+        lastRegHadPoint = false;
     }
 
     private void syncRegistration() {
         if (!(level instanceof ServerLevel sl)) return;
 
         int key = getNetworkKey();
+        boolean nowPlug = hasAnyEffectivePlug();
+        boolean nowPoint = hasAnyEffectivePoint();
 
-        // убираем старую запись если поменялось что-то важное
-        if (lastRegMode != null && lastRegKey != Integer.MIN_VALUE) {
-            if (lastRegKey != key || lastRegMode != mode) {
-                unregisterFromManager();
-            }
+        boolean hadSomething = (lastRegKey != Integer.MIN_VALUE) && (lastRegHadPlug || lastRegHadPoint);
+        boolean keyChanged = hadSomething && (lastRegKey != key);
+        boolean plugChanged = hadSomething && (lastRegHadPlug != nowPlug);
+        boolean pointChanged = hadSomething && (lastRegHadPoint != nowPoint);
+
+        if (hadSomething && (keyChanged || plugChanged || pointChanged)) {
+            unregisterFromManager();
         }
 
-        // регистрируем заново
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
-        if (mode == Mode.PLUG) mgr.registerPlug(key, worldPosition);
-        else mgr.registerPoint(key, worldPosition);
+        if (nowPlug) mgr.registerPlug(key, worldPosition);
+        if (nowPoint) mgr.registerPoint(key, worldPosition);
 
         lastRegKey = key;
-        lastRegMode = mode;
+        lastRegHadPlug = nowPlug;
+        lastRegHadPoint = nowPoint;
+    }
+
+    @Override
+    public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+        CompoundTag tag = super.getUpdateTag(registries);
+        saveAdditional(tag, registries);
+        return tag;
+    }
+
+    @Nullable
+    @Override
+    public ClientboundBlockEntityDataPacket getUpdatePacket() {
+        return ClientboundBlockEntityDataPacket.create(this);
     }
 
     // ---------------- ticking / transfer ----------------
@@ -172,70 +279,75 @@ public class ItemPlugBlockEntity extends BlockEntity {
     public static void serverTick(Level level, BlockPos pos, BlockState state, ItemPlugBlockEntity be) {
         if (!(level instanceof ServerLevel sl)) return;
         if (!be.enabled) return;
-        if (be.mode != Mode.POINT) return;
 
-        // чтобы не спамить: пробуем раз в 10 тиков (0.5 сек)
         long gt = sl.getGameTime();
         if ((gt % 10L) != 0L) return;
 
-        be.tryPullOnce(sl);
+        for (Direction pointSide : Direction.values()) {
+            if (be.isPointEnabled(pointSide)) {
+                be.tryPullOnce(sl, pointSide);
+            }
+        }
     }
 
-    /**
-     * POINT тянет 1 предмет из одного из PLUG'ов с тем же networkKey
-     * и пытается положить в контейнер, к которому подключён POINT.
-     */
-    private void tryPullOnce(ServerLevel sl) {
+    private void tryPullOnce(ServerLevel sl, Direction pointSide) {
         int key = getNetworkKey();
+
+        Container dst = getAttachedContainer(sl, worldPosition, pointSide);
+        if (dst == null) return;
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
         List<BlockPos> plugs = mgr.getPlugsSnapshot(key);
         if (plugs.isEmpty()) return;
 
-        // куда складываем: контейнер "за" выбранной гранью
-        Container dst = getAttachedContainer(sl, worldPosition, side);
-        if (dst == null) return;
+        int pIdx = dirIndex(pointSide);
+        int start = rrIndexBySide[pIdx];
 
-        // round-robin по PLUG’ам
-        int start = rrIndex;
         for (int i = 0; i < plugs.size(); i++) {
             int idx = (start + i) % plugs.size();
             BlockPos plugPos = plugs.get(idx);
 
-            // берём PLUG BE и его контейнер
             BlockEntity other = sl.getBlockEntity(plugPos);
             if (!(other instanceof ItemPlugBlockEntity plugBe)) continue;
-            if (plugBe.mode != Mode.PLUG) continue;
             if (!plugBe.enabled) continue;
 
-            Container src = getAttachedContainer(sl, plugPos, plugBe.side);
-            if (src == null) continue;
+            boolean moved = false;
+            for (Direction plugSide : Direction.values()) {
+                if (!plugBe.isPlugEnabled(plugSide)) continue;
 
-            if (moveOneItem(src, dst)) {
-                rrIndex = (idx + 1) % plugs.size();
-                setChanged(); // чтобы rrIndex сохранялся
+                Container src = getAttachedContainer(sl, plugPos, plugSide);
+                if (src == null) continue;
+
+                if (moveOneItem(src, dst)) {
+                    moved = true;
+                    break;
+                }
+            }
+
+            if (moved) {
+                rrIndexBySide[pIdx] = (idx + 1) % plugs.size();
+                setChanged();
                 return;
             }
         }
 
-        // если ничего не смогли — всё равно крутим индекс, чтобы не “залипать”
-        rrIndex = (rrIndex + 1) % plugs.size();
+        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % plugs.size();
         setChanged();
     }
 
     /**
-     * Контейнер, к которому "пристыкован" наш блок.
-     * Мы считаем, что контейнер находится на блоке "за" гранью: pos.relative(side.getOpposite()).
+     * Container attached to side.
+     *
+     * IMPORTANT: We consider the container is IN FRONT of that face:
+     * target = selfPos.relative(side).
+     *
+     * (Old opposite()-rule was confusing and made sides feel “reversed”.)
      */
     private static Container getAttachedContainer(ServerLevel level, BlockPos selfPos, Direction side) {
-        BlockPos target = selfPos.relative(side.getOpposite());
+        BlockPos target = selfPos.relative(side);
         return HopperBlockEntity.getContainerAt(level, target);
     }
 
-    /**
-     * Переместить 1 предмет из src в dst. Без sided-логики (для сундуков хватает).
-     * Возвращает true если реально переместили.
-     */
     private static boolean moveOneItem(Container src, Container dst) {
         for (int i = 0; i < src.getContainerSize(); i++) {
             ItemStack s = src.getItem(i);
@@ -272,27 +384,6 @@ public class ItemPlugBlockEntity extends BlockEntity {
         return false;
     }
 
-    // ---------------- client sync (важно для рендера) ----------------
-
-    @Nullable
-    @Override
-    public ClientboundBlockEntityDataPacket getUpdatePacket() {
-        // клиент получит tag из saveAdditional()
-        return ClientboundBlockEntityDataPacket.create(this);
-    }
-
-    @Override
-    public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
-        // то же самое: отправляем клиенту актуальные данные
-        return saveWithoutMetadata(registries);
-    }
-
-    @Override
-    public void handleUpdateTag(CompoundTag tag, HolderLookup.Provider registries) {
-        // применяем данные на клиенте
-        loadAdditional(tag, registries);
-    }
-
     // ---------------- NBT ----------------
 
     @Override
@@ -300,37 +391,43 @@ public class ItemPlugBlockEntity extends BlockEntity {
         super.saveAdditional(tag, registries);
 
         tag.putInt(QuickLinkNbt.COLORS, colors.pack());
-        tag.putByte(QuickLinkNbt.SIDE, (byte) side.get3DDataValue());
         tag.putBoolean(QuickLinkNbt.ENABLED, enabled);
 
-        tag.putByte("ql_mode", mode.id);
-        tag.putInt("ql_rr", rrIndex);
+        tag.putInt("ql_plug_mask", clampMask6(plugMask));
+        tag.putInt("ql_point_mask", clampMask6(pointMask));
+        tag.putInt("ql_disabled_mask", clampMask6(disabledMask));
+
+        tag.putIntArray("ql_rr_side", rrIndexBySide);
     }
 
     @Override
     public void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.loadAdditional(tag, registries);
 
-        // ---- Codex patch: защитные дефолты, если каких-то ключей нет ----
         int defaultPackedColors = QuickLinkColors.unset().pack();
-        colors = QuickLinkColors.unpack(tag.contains(QuickLinkNbt.COLORS, Tag.TAG_INT)
+        int packed = tag.contains(QuickLinkNbt.COLORS, Tag.TAG_INT)
                 ? tag.getInt(QuickLinkNbt.COLORS)
-                : defaultPackedColors);
+                : defaultPackedColors;
+        colors = QuickLinkColors.unpack(packed);
 
-        side = tag.contains(QuickLinkNbt.SIDE, Tag.TAG_BYTE)
-                ? Direction.from3DDataValue(tag.getByte(QuickLinkNbt.SIDE))
-                : Direction.NORTH;
+        enabled = !tag.contains(QuickLinkNbt.ENABLED, Tag.TAG_BYTE) || tag.getBoolean(QuickLinkNbt.ENABLED);
 
-        enabled = !tag.contains(QuickLinkNbt.ENABLED, Tag.TAG_BYTE)
-                || tag.getBoolean(QuickLinkNbt.ENABLED);
+        plugMask = clampMask6(tag.contains("ql_plug_mask", Tag.TAG_INT) ? tag.getInt("ql_plug_mask") : 0);
+        pointMask = clampMask6(tag.contains("ql_point_mask", Tag.TAG_INT) ? tag.getInt("ql_point_mask") : 0);
+        disabledMask = clampMask6(tag.contains("ql_disabled_mask", Tag.TAG_INT) ? tag.getInt("ql_disabled_mask") : 0);
 
-        mode = tag.contains("ql_mode", Tag.TAG_BYTE)
-                ? Mode.fromId(tag.getByte("ql_mode"))
-                : Mode.PLUG;
+        if (tag.contains("ql_rr_side", Tag.TAG_INT_ARRAY)) {
+            int[] arr = tag.getIntArray("ql_rr_side");
+            for (int i = 0; i < 6; i++) {
+                rrIndexBySide[i] = (arr != null && arr.length > i) ? Math.max(0, arr[i]) : 0;
+            }
+        } else {
+            for (int i = 0; i < 6; i++) rrIndexBySide[i] = 0;
+        }
 
-        rrIndex = tag.contains("ql_rr", Tag.TAG_INT)
-                ? tag.getInt("ql_rr")
-                : 0;
-        // ---------------------------------------------------------------
+        int both = plugMask & pointMask;
+        if (both != 0) {
+            plugMask &= ~both; // prefer POINT if old data had both
+        }
     }
 }
