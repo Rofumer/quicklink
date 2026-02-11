@@ -1,4 +1,9 @@
 package com.maximpolyakov.quicklink;
 
-public class QuickLinkNbt {
+public final class QuickLinkNbt {
+    private QuickLinkNbt() {}
+
+    public static final String COLORS = "ColorsPacked"; // int (0..0xFFFF)
+    public static final String SIDE = "Side";           // byte (Direction.get3DDataValue())
+    public static final String ENABLED = "Enabled";     // boolean
 }
