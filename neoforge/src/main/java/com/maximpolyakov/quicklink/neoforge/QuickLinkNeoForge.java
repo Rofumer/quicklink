@@ -1,7 +1,9 @@
 package com.maximpolyakov.quicklink.neoforge;
 
 import com.maximpolyakov.quicklink.QuickLink;
+import com.maximpolyakov.quicklink.neoforge.block.FluidPlugBlock;
 import com.maximpolyakov.quicklink.neoforge.block.ItemPlugBlock;
+import com.maximpolyakov.quicklink.neoforge.blockentity.FluidPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.blockentity.ItemPlugBlockEntity;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.world.item.BlockItem;
@@ -9,6 +11,7 @@ import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModLoadingContext;
 import net.neoforged.fml.common.Mod;
@@ -39,6 +42,24 @@ public final class QuickLinkNeoForge {
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<ItemPlugBlockEntity>> ITEM_PLUG_BE =
             BLOCK_ENTITIES.register("item_plug",
                     () -> BlockEntityType.Builder.of(ItemPlugBlockEntity::new, ITEM_PLUG.get()).build(null));
+
+    public static final DeferredHolder<Block, FluidPlugBlock> FLUID_PLUG_BLOCK = BLOCKS.register(
+            "fluid_plug",
+            () -> new FluidPlugBlock(BlockBehaviour.Properties.of().strength(2.0F).noOcclusion())
+    );
+
+    public static final DeferredHolder<Item, BlockItem> FLUID_PLUG_ITEM = ITEMS.register(
+            "fluid_plug",
+            () -> new BlockItem(FLUID_PLUG_BLOCK.get(), new Item.Properties())
+    );
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<FluidPlugBlockEntity>> FLUID_PLUG_BE =
+            BLOCK_ENTITIES.register("fluid_plug",
+                    () -> BlockEntityType.Builder
+                            .of(FluidPlugBlockEntity::new, FLUID_PLUG_BLOCK.get())
+                            .build(null)
+            );
+
 
     public QuickLinkNeoForge() {
         QuickLink.init();
