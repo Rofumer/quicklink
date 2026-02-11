@@ -8,6 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
@@ -56,27 +57,20 @@ public class ItemPlugBlockEntity extends BlockEntity {
     // ---------------- getters/setters ----------------
 
     public Direction getSide() { return side; }
-
     public void setSide(Direction side) {
         this.side = (side == null) ? Direction.NORTH : side;
         setChangedAndSync();
-        // side не влияет на сеть, реестр не трогаем
     }
 
     public boolean isEnabled() { return enabled; }
-
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
         setChangedAndSync();
-        // enabled не влияет на сеть, реестр не трогаем
     }
 
     public Mode getMode() { return mode; }
-
     public void setMode(Mode mode) {
         if (mode == null) mode = Mode.PLUG;
-        if (this.mode == mode) return;
-
         this.mode = mode;
         setChangedAndSync();
         syncRegistration(); // важно: PLUG<->POINT меняет реестр
@@ -96,7 +90,6 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
     public void setColor(int slot, byte colorId) {
         int oldKey = getNetworkKey();
-
         colors = colors.with(slot, colorId);
         setChangedAndSync();
 
@@ -115,39 +108,13 @@ public class ItemPlugBlockEntity extends BlockEntity {
         setMode(this.mode == Mode.PLUG ? Mode.POINT : Mode.PLUG);
     }
 
-    // ---------------- BE sync (server -> client) ----------------
-    // Это нужно для твоего рендера: цвета/side/mode должны попасть на клиент.
-
-    @Override
-    public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
-        CompoundTag tag = new CompoundTag();
-        saveAdditional(tag, registries);
-        return tag;
-    }
-
-    @Override
-    public void handleUpdateTag(CompoundTag tag, HolderLookup.Provider registries) {
-        loadAdditional(tag, registries);
-    }
-
-    @Nullable
-    @Override
-    public ClientboundBlockEntityDataPacket getUpdatePacket() {
-        return ClientboundBlockEntityDataPacket.create(this);
-    }
-
     // ---------------- lifecycle / networking ----------------
 
     private void setChangedAndSync() {
         setChanged();
-
-        if (level != null) {
-            // иногда полезно в 1.21+, чтобы движок точно понял, что BE менялся
-            level.blockEntityChanged(worldPosition);
-
-            if (!level.isClientSide) {
-                level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
-            }
+        if (level != null && !level.isClientSide) {
+            // это важно для клиента/рендера
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
         }
     }
 
@@ -235,6 +202,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
             int idx = (start + i) % plugs.size();
             BlockPos plugPos = plugs.get(idx);
 
+            // берём PLUG BE и его контейнер
             BlockEntity other = sl.getBlockEntity(plugPos);
             if (!(other instanceof ItemPlugBlockEntity plugBe)) continue;
             if (plugBe.mode != Mode.PLUG) continue;
@@ -245,7 +213,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
             if (moveOneItem(src, dst)) {
                 rrIndex = (idx + 1) % plugs.size();
-                setChanged(); // rrIndex сохраняем на диск, клиенту он не нужен
+                setChanged(); // чтобы rrIndex сохранялся
                 return;
             }
         }
@@ -304,6 +272,27 @@ public class ItemPlugBlockEntity extends BlockEntity {
         return false;
     }
 
+    // ---------------- client sync (важно для рендера) ----------------
+
+    @Nullable
+    @Override
+    public ClientboundBlockEntityDataPacket getUpdatePacket() {
+        // клиент получит tag из saveAdditional()
+        return ClientboundBlockEntityDataPacket.create(this);
+    }
+
+    @Override
+    public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
+        // то же самое: отправляем клиенту актуальные данные
+        return saveWithoutMetadata(registries);
+    }
+
+    @Override
+    public void handleUpdateTag(CompoundTag tag, HolderLookup.Provider registries) {
+        // применяем данные на клиенте
+        loadAdditional(tag, registries);
+    }
+
     // ---------------- NBT ----------------
 
     @Override
@@ -322,11 +311,26 @@ public class ItemPlugBlockEntity extends BlockEntity {
     public void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.loadAdditional(tag, registries);
 
-        colors = QuickLinkColors.unpack(tag.getInt(QuickLinkNbt.COLORS));
-        side = Direction.from3DDataValue(tag.getByte(QuickLinkNbt.SIDE));
-        enabled = tag.getBoolean(QuickLinkNbt.ENABLED);
+        // ---- Codex patch: защитные дефолты, если каких-то ключей нет ----
+        int defaultPackedColors = QuickLinkColors.unset().pack();
+        colors = QuickLinkColors.unpack(tag.contains(QuickLinkNbt.COLORS, Tag.TAG_INT)
+                ? tag.getInt(QuickLinkNbt.COLORS)
+                : defaultPackedColors);
 
-        mode = Mode.fromId(tag.getByte("ql_mode"));
-        rrIndex = tag.getInt("ql_rr");
+        side = tag.contains(QuickLinkNbt.SIDE, Tag.TAG_BYTE)
+                ? Direction.from3DDataValue(tag.getByte(QuickLinkNbt.SIDE))
+                : Direction.NORTH;
+
+        enabled = !tag.contains(QuickLinkNbt.ENABLED, Tag.TAG_BYTE)
+                || tag.getBoolean(QuickLinkNbt.ENABLED);
+
+        mode = tag.contains("ql_mode", Tag.TAG_BYTE)
+                ? Mode.fromId(tag.getByte("ql_mode"))
+                : Mode.PLUG;
+
+        rrIndex = tag.contains("ql_rr", Tag.TAG_INT)
+                ? tag.getInt("ql_rr")
+                : 0;
+        // ---------------------------------------------------------------
     }
 }
