@@ -75,6 +75,7 @@ public final class QuickLinkNeoForge {
     private void addCreative(BuildCreativeModeTabContentsEvent e) {
         if (e.getTabKey() == CreativeModeTabs.FUNCTIONAL_BLOCKS) {
             e.accept(ITEM_PLUG_ITEM.get());
+            e.accept(FLUID_PLUG_ITEM.get()); // <-- добавь эту строку
         }
     }
 }
