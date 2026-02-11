@@ -29,6 +29,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
     public static final int TRANSFER_MB = 250; // 250 / 500 / 1000
     // попытка раз в N тиков
     public static final int TICK_PERIOD = 10;
+    // отладка трансфера (включи если снова "ничего не происходит")
+    private static final boolean DBG_TRANSFER = true;
     // =========================
 
     // ---- per-side roles ----
@@ -294,10 +296,19 @@ public class FluidPlugBlockEntity extends BlockEntity {
         int key = getNetworkKey();
 
         IFluidHandler dst = getAttachedFluidHandler(sl, worldPosition, pointSide);
+        if (DBG_TRANSFER) {
+            System.out.println("[QLF][DBG] point@" + worldPosition + " side=" + pointSide
+                    + " key=" + key + " enabled=" + enabled
+                    + " plugMask=" + Integer.toBinaryString(plugMask)
+                    + " pointMask=" + Integer.toBinaryString(pointMask)
+                    + " disabled=" + Integer.toBinaryString(disabledMask));
+            System.out.println("[QLF][DBG] dst=" + (dst == null ? "null" : ("tanks=" + dst.getTanks())));
+        }
         if (dst == null) return;
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
         List<BlockPos> plugs = mgr.getPlugsSnapshot(key);
+        if (DBG_TRANSFER) System.out.println("[QLF][DBG] plugs=" + plugs.size());
         if (plugs.isEmpty()) return;
 
         int pIdx = dirIndex(pointSide);
@@ -311,12 +322,20 @@ public class FluidPlugBlockEntity extends BlockEntity {
             if (!(other instanceof FluidPlugBlockEntity plugBe)) continue;
             if (!plugBe.enabled) continue;
 
-            // iterate all enabled PLUG sides of that BE
+            if (DBG_TRANSFER) {
+                boolean anyPlugSide = (plugBe.plugMask & ~plugBe.disabledMask) != 0;
+                System.out.println("[QLF][DBG] plug@" + plugPos + " plugEnabledAny=" + anyPlugSide + " enabled=" + plugBe.enabled);
+            }
+
             boolean moved = false;
+
+            // iterate all enabled PLUG sides of that BE
             for (Direction plugSide : Direction.values()) {
                 if (!plugBe.isPlugEnabled(plugSide)) continue;
 
                 IFluidHandler src = getAttachedFluidHandler(sl, plugPos, plugSide);
+                if (DBG_TRANSFER) System.out.println("[QLF][DBG] src=" + (src == null ? "null" : ("tanks=" + src.getTanks()))
+                        + " at plug@" + plugPos + " side=" + plugSide);
                 if (src == null) continue;
 
                 if (moveFluid(src, dst, amountMB)) {
@@ -338,17 +357,18 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
     /**
      * IMPORTANT:
-     * Container/handler is considered "behind" the face:
-     * target = selfPos.relative(side.getOpposite())
+     * target is "behind" the face: target = selfPos.relative(side.getOpposite())
      *
-     * Also, the handler side we query should be the face of the TARGET that touches us,
-     * i.e. side (not opposite). This is the common bug that makes dst/src null.
+     * Capability query side MUST be the TARGET's side that touches us, i.e. 'side' (not opposite).
+     * This is the common bug that makes dst/src null with tanks.
      */
     @Nullable
     private static IFluidHandler getAttachedFluidHandler(ServerLevel level, BlockPos selfPos, Direction side) {
-        BlockPos target = selfPos.relative(side.getOpposite());
-        // We are "touching" the target on the target's side = side
-        return level.getCapability(Capabilities.FluidHandler.BLOCK, target, side);
+        // Ищем соседний блок НА ЭТОЙ стороне
+        BlockPos target = selfPos.relative(side);
+        // А capability у соседа спрашиваем со стороны, которая СМОТРИТ НА НАС
+        Direction targetFaceTowardUs = side.getOpposite();
+        return level.getCapability(Capabilities.FluidHandler.BLOCK, target, targetFaceTowardUs);
     }
 
     /**
@@ -359,20 +379,21 @@ public class FluidPlugBlockEntity extends BlockEntity {
         if (amountMB <= 0) return false;
 
         FluidStack canDrain = src.drain(amountMB, IFluidHandler.FluidAction.SIMULATE);
-        if (canDrain.isEmpty()) return false;
+        if (DBG_TRANSFER) System.out.println("[QLF][DBG] drainSim=" + (canDrain.isEmpty() ? "EMPTY" : (canDrain.getAmount() + " " + canDrain.getFluid())));
+        if (canDrain.isEmpty() || canDrain.getAmount() <= 0) return false;
 
         int canFill = dst.fill(canDrain, IFluidHandler.FluidAction.SIMULATE);
+        if (DBG_TRANSFER) System.out.println("[QLF][DBG] fillSim=" + canFill);
         if (canFill <= 0) return false;
 
-        // clamp to what both sides agree on
         int toMove = Math.min(canDrain.getAmount(), canFill);
         if (toMove <= 0) return false;
 
         FluidStack drained = src.drain(toMove, IFluidHandler.FluidAction.EXECUTE);
-        if (drained.isEmpty()) return false;
+        if (drained.isEmpty() || drained.getAmount() <= 0) return false;
 
         int filled = dst.fill(drained, IFluidHandler.FluidAction.EXECUTE);
-        // in normal handlers filled == drained.amount, but we guard anyway
+        if (DBG_TRANSFER) System.out.println("[QLF][DBG] drained=" + drained.getAmount() + " filled=" + filled);
         return filled > 0;
     }
 
