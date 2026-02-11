@@ -30,7 +30,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
     // попытка раз в N тиков
     public static final int TICK_PERIOD = 10;
     // отладка трансфера (включи если снова "ничего не происходит")
-    private static final boolean DBG_TRANSFER = true;
+    private static final boolean DBG_TRANSFER = false;
     // =========================
 
     // ---- per-side roles ----
