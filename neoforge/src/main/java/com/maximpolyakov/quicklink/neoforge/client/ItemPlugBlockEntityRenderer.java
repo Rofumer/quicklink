@@ -26,6 +26,14 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
     private static final ResourceLocation WHITE_TEX =
             ResourceLocation.fromNamespaceAndPath("minecraft", "block/white_wool");
 
+    // ===== “Variant C” knobs =====
+    // Поднимаем lightmap на N пунктов (0..15). 0 = выключено.
+    private static final int LIGHT_BOOST_BLOCK = 5; // попробуй 4..8
+    private static final int LIGHT_BOOST_SKY   = 2; // попробуй 1..5
+    // Нелинейное “высветление” цвета. 1.0 = выключено, меньше = ярче.
+    private static final float COLOR_GAMMA = 0.80f; // 0.75..0.90 обычно ок
+    // ============================
+
     public ItemPlugBlockEntityRenderer(BlockEntityRendererProvider.Context ctx) {}
 
     @Override
@@ -33,13 +41,12 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
                        MultiBufferSource buffer, int packedLight, int packedOverlay) {
 
         // ===== DIAGNOSTIC SWITCHES =====
-        final boolean DBG_LOG_EVERY_2S = false;       // лог в консоль раз в ~2 секунды
-        final boolean DBG_FORCE_FULLBRIGHT = false;   // если true — всегда ярко (для отладки)
-        final boolean DBG_DRAW_ALL_FACES = true;      // true: рисуем на всех 6 гранях (для отладки)
+        final boolean DBG_LOG_EVERY_2S = false;
+        final boolean DBG_FORCE_FULLBRIGHT = false; // только для отладки
+        final boolean DBG_DRAW_ALL_FACES = false;   // обычно false: рисуем только на be.getSide()
         // =================================
 
-        // Если цвета не настроены (все UNSET=7) — не рисуем оверлей квадрантов.
-        // Важно: это только визуал; сеть “по умолчанию” (7,7,7,7) продолжает работать.
+        // Если вообще ничего не покрашено — не рисуем оверлей (блок остаётся камнем).
         if (be.getColors().isAllUnset()) {
             return;
         }
@@ -64,10 +71,14 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
 
         int overlay = OverlayTexture.NO_OVERLAY;
 
-        // свет: либо как пришло (правильно), либо fullbright (для отладки)
-        int light = DBG_FORCE_FULLBRIGHT ? LightTexture.FULL_BRIGHT : packedLight;
+        int light;
+        if (DBG_FORCE_FULLBRIGHT) {
+            light = LightTexture.FULL_BRIGHT;
+        } else {
+            // Вариант C: берём реальный packedLight, но “чуть поднимаем”
+            light = boostLight(packedLight, LIGHT_BOOST_BLOCK, LIGHT_BOOST_SKY);
+        }
 
-        // лог раз в ~2 секунды (40 тиков)
         if (DBG_LOG_EVERY_2S && Minecraft.getInstance().player != null) {
             int t = Minecraft.getInstance().player.tickCount;
             if ((t % 40) == 0) {
@@ -79,36 +90,35 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
             }
         }
 
-        // Рисуем либо на всех гранях (редко нужно), либо только на выбранной
         if (DBG_DRAW_ALL_FACES) {
             for (Direction d : Direction.values()) {
-                draw4Quadrants(vc, pose, mat, d, EPS, U0, U1, V0, V1, c, light, overlay, false);
+                draw4QuadrantsSelective(vc, pose, mat, d, EPS, U0, U1, V0, V1, c, light, overlay);
             }
         } else {
-            draw4Quadrants(vc, pose, mat, face, EPS, U0, U1, V0, V1, c, light, overlay, false);
+            draw4QuadrantsSelective(vc, pose, mat, face, EPS, U0, U1, V0, V1, c, light, overlay);
         }
     }
 
-    /** рисуем 4 квадранта на одной грани */
-    private static void draw4Quadrants(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
-                                       Direction face, float eps,
-                                       float U0, float U1, float V0, float V1,
-                                       byte[] c, int light, int overlay,
-                                       boolean forceRed) {
+    /**
+     * Рисуем 4 квадранта на одной грани, НО только те, что не UNSET.
+     * Это важно, чтобы “непокрашенные” не становились чёрными/тусклыми.
+     */
+    private static void draw4QuadrantsSelective(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
+                                                Direction face, float eps,
+                                                float U0, float U1, float V0, float V1,
+                                                byte[] c, int light, int overlay) {
 
-        // ВАЖНО: пропускаем UNSET-квадранты, чтобы они выглядели как “нет оверлея” (камень),
-        // а не “заливаются” каким-то цветом/темнотой.
-        if (forceRed || (c[0] != QuickLinkColors.UNSET)) {
-            drawQuadrantFlippedY(vc, pose, mat, face, 0f, 0.5f, 0f, 0.5f, eps, U0, U1, V0, V1, c[0], light, overlay, forceRed); // TL
+        if (c[0] != QuickLinkColors.UNSET) {
+            drawQuadrantFlippedY(vc, pose, mat, face, 0f, 0.5f, 0f, 0.5f, eps, U0, U1, V0, V1, c[0], light, overlay);
         }
-        if (forceRed || (c[1] != QuickLinkColors.UNSET)) {
-            drawQuadrantFlippedY(vc, pose, mat, face, 0.5f, 1f, 0f, 0.5f, eps, U0, U1, V0, V1, c[1], light, overlay, forceRed); // TR
+        if (c[1] != QuickLinkColors.UNSET) {
+            drawQuadrantFlippedY(vc, pose, mat, face, 0.5f, 1f, 0f, 0.5f, eps, U0, U1, V0, V1, c[1], light, overlay);
         }
-        if (forceRed || (c[2] != QuickLinkColors.UNSET)) {
-            drawQuadrantFlippedY(vc, pose, mat, face, 0f, 0.5f, 0.5f, 1f, eps, U0, U1, V0, V1, c[2], light, overlay, forceRed); // BL
+        if (c[2] != QuickLinkColors.UNSET) {
+            drawQuadrantFlippedY(vc, pose, mat, face, 0f, 0.5f, 0.5f, 1f, eps, U0, U1, V0, V1, c[2], light, overlay);
         }
-        if (forceRed || (c[3] != QuickLinkColors.UNSET)) {
-            drawQuadrantFlippedY(vc, pose, mat, face, 0.5f, 1f, 0.5f, 1f, eps, U0, U1, V0, V1, c[3], light, overlay, forceRed); // BR
+        if (c[3] != QuickLinkColors.UNSET) {
+            drawQuadrantFlippedY(vc, pose, mat, face, 0.5f, 1f, 0.5f, 1f, eps, U0, U1, V0, V1, c[3], light, overlay);
         }
     }
 
@@ -120,20 +130,18 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
             float x0, float x1, float y0, float y1,
             float eps,
             float U0, float U1, float V0, float V1,
-            byte colorId,
+            byte dyeId,
             int light,
-            int overlay,
-            boolean forceRed
+            int overlay
     ) {
-        // инверсия вертикали
+        // инверсия вертикали, чтобы “верх” действительно был сверху
         float fy0 = 1f - y1;
         float fy1 = 1f - y0;
 
         drawQuadrant(vc, pose, mat, face,
                 x0, x1, fy0, fy1,
                 eps, U0, U1, V0, V1,
-                colorId, light, overlay,
-                forceRed);
+                dyeId, light, overlay);
     }
 
     private static void drawQuadrant(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
@@ -142,21 +150,19 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
                                      float eps,
                                      float U0, float U1, float V0, float V1,
                                      byte dyeId,
-                                     int light, int overlay,
-                                     boolean forceRed) {
+                                     int light, int overlay) {
 
-        float r, g, b;
+        int rgb = DyeColor.byId(dyeId & 0xFF).getFireworkColor();
+        float r = ((rgb >> 16) & 0xFF) / 255f;
+        float g = ((rgb >> 8) & 0xFF) / 255f;
+        float b = (rgb & 0xFF) / 255f;
+
+        // Вариант C: “чуть поднять” сам цвет (gamma-like)
+        r = gammaLift(r, COLOR_GAMMA);
+        g = gammaLift(g, COLOR_GAMMA);
+        b = gammaLift(b, COLOR_GAMMA);
+
         float a = 1f;
-
-        if (forceRed) {
-            r = 1f; g = 0f; b = 0f;
-        } else {
-            // яркий RGB из фейерверков (обычно выглядит лучше)
-            int rgb = DyeColor.byId(dyeId & 0xFF).getFireworkColor();
-            r = ((rgb >> 16) & 0xFF) / 255f;
-            g = ((rgb >> 8) & 0xFF) / 255f;
-            b = (rgb & 0xFF) / 255f;
-        }
 
         float nx = face.getStepX();
         float ny = face.getStepY();
@@ -217,5 +223,31 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
                 .setOverlay(overlay)
                 .setLight(light)
                 .setNormal(pose, nx, ny, nz);
+    }
+
+    /**
+     * Поднимаем упакованный lightmap:
+     * block/sky — по 0..15, просто добавляем и clamp.
+     */
+    private static int boostLight(int packedLight, int addBlock, int addSky) {
+        if (addBlock <= 0 && addSky <= 0) return packedLight;
+
+        int block = LightTexture.block(packedLight);
+        int sky = LightTexture.sky(packedLight);
+
+        block = Math.min(15, block + Math.max(0, addBlock));
+        sky = Math.min(15, sky + Math.max(0, addSky));
+
+        return LightTexture.pack(block, sky);
+    }
+
+    /**
+     * gamma < 1 => светлее. 1 => без изменений.
+     */
+    private static float gammaLift(float c, float gamma) {
+        if (gamma >= 0.999f) return c;
+        if (c <= 0f) return 0f;
+        if (c >= 1f) return 1f;
+        return (float) Math.pow(c, gamma);
     }
 }
