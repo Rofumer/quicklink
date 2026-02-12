@@ -46,11 +46,11 @@ public class FluidPlugBlockEntityRenderer implements BlockEntityRenderer<FluidPl
     private static final float POINT_B = 0.25f;
     // ============================
 
-    // ===== Disabled X knobs =====
-    private static final float X_THICK     = 0.05f; // толщина штриха X
+    // ===== Disabled X knobs (tuned) =====
+    private static final float X_THICK     = 0.055f; // чуть толще
     private static final float X_ALPHA     = 0.95f;
-    private static final int   X_SEGMENTS  = 7;     // сколько штрихов на диагональ
-    private static final float X_GAP_RATIO = 0.35f; // доля “пустоты” внутри сегмента
+    private static final int   X_SEGMENTS  = 11;     // больше сегментов => меньше “квадратиков”
+    private static final float X_GAP_RATIO = 0.45f;  // больше “пустоты” => реально пунктир
     // =============================
 
     public FluidPlugBlockEntityRenderer(BlockEntityRendererProvider.Context ctx) {}
@@ -208,7 +208,7 @@ public class FluidPlugBlockEntityRenderer implements BlockEntityRenderer<FluidPl
                 U0, U1, V0, V1, r, g, b, a, light, overlay);
     }
 
-    // ---------------- Disabled: dashed X (axis-aligned) ----------------
+    // ---------------- Disabled: dashed X (axis-aligned rectangles) ----------------
 
     private static void drawCrossXDashedAxisAligned(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
                                                     Direction face, float eps,
@@ -219,12 +219,12 @@ public class FluidPlugBlockEntityRenderer implements BlockEntityRenderer<FluidPl
 
         // diag 1: (0,0)->(1,1)
         drawDashedDiagAxisAligned(vc, pose, mat, face, eps, U0, U1, V0, V1,
-                r,g,b,a, thick, light, overlay,
+                r, g, b, a, thick, light, overlay,
                 0f, 0f, 1f, 1f);
 
         // diag 2: (1,0)->(0,1)
         drawDashedDiagAxisAligned(vc, pose, mat, face, eps, U0, U1, V0, V1,
-                r,g,b,a, thick, light, overlay,
+                r, g, b, a, thick, light, overlay,
                 1f, 0f, 0f, 1f);
     }
 
@@ -276,7 +276,7 @@ public class FluidPlugBlockEntityRenderer implements BlockEntityRenderer<FluidPl
         }
     }
 
-    // ---------------- Core: draw rect on a face ----------------
+    // ---------------- Core: draw rect on a face (FIXED UVs) ----------------
 
     private static void drawRectOnFace(VertexConsumer vc, PoseStack.Pose pose, Matrix4f mat,
                                        Direction face, float eps,
@@ -290,6 +290,12 @@ public class FluidPlugBlockEntityRenderer implements BlockEntityRenderer<FluidPl
         float vv0 = Math.min(v0, v1);
         float vv1 = Math.max(v0, v1);
 
+        // UVs proportional to local rect area (prevents “full texture per strip” stretching)
+        float tu0 = lerp(U0, U1, uu0);
+        float tu1 = lerp(U0, U1, uu1);
+        float tv0 = lerp(V0, V1, vv0);
+        float tv1 = lerp(V0, V1, vv1);
+
         float nx = face.getStepX();
         float ny = face.getStepY();
         float nz = face.getStepZ();
@@ -297,27 +303,27 @@ public class FluidPlugBlockEntityRenderer implements BlockEntityRenderer<FluidPl
         switch (face) {
             case SOUTH -> quad(vc, pose, mat, nx, ny, nz,
                     uu0, vv0, 1f + eps,  uu1, vv0, 1f + eps,  uu1, vv1, 1f + eps,  uu0, vv1, 1f + eps,
-                    U0, V0, U1, V1, r, g, b, a, light, overlay);
+                    tu0, tv0, tu1, tv1, r, g, b, a, light, overlay);
 
             case NORTH -> quad(vc, pose, mat, nx, ny, nz,
                     1f - uu0, vv0, -eps,  1f - uu1, vv0, -eps,  1f - uu1, vv1, -eps,  1f - uu0, vv1, -eps,
-                    U0, V0, U1, V1, r, g, b, a, light, overlay);
+                    tu0, tv0, tu1, tv1, r, g, b, a, light, overlay);
 
             case EAST -> quad(vc, pose, mat, nx, ny, nz,
                     1f + eps, vv0, 1f - uu0,  1f + eps, vv0, 1f - uu1,  1f + eps, vv1, 1f - uu1,  1f + eps, vv1, 1f - uu0,
-                    U0, V0, U1, V1, r, g, b, a, light, overlay);
+                    tu0, tv0, tu1, tv1, r, g, b, a, light, overlay);
 
             case WEST -> quad(vc, pose, mat, nx, ny, nz,
                     -eps, vv0, uu0,  -eps, vv0, uu1,  -eps, vv1, uu1,  -eps, vv1, uu0,
-                    U0, V0, U1, V1, r, g, b, a, light, overlay);
+                    tu0, tv0, tu1, tv1, r, g, b, a, light, overlay);
 
             case UP -> quad(vc, pose, mat, nx, ny, nz,
                     uu0, 1f + eps, 1f - vv0,  uu1, 1f + eps, 1f - vv0,  uu1, 1f + eps, 1f - vv1,  uu0, 1f + eps, 1f - vv1,
-                    U0, V0, U1, V1, r, g, b, a, light, overlay);
+                    tu0, tv0, tu1, tv1, r, g, b, a, light, overlay);
 
             case DOWN -> quad(vc, pose, mat, nx, ny, nz,
                     uu0, -eps, vv0,  uu1, -eps, vv0,  uu1, -eps, vv1,  uu0, -eps, vv1,
-                    U0, V0, U1, V1, r, g, b, a, light, overlay);
+                    tu0, tv0, tu1, tv1, r, g, b, a, light, overlay);
         }
     }
 
