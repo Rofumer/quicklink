@@ -2,6 +2,7 @@ package com.maximpolyakov.quicklink.neoforge.client;
 
 import com.maximpolyakov.quicklink.QuickLink;
 import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
+import net.minecraft.client.renderer.blockentity.BlockEntityRenderers;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
@@ -13,5 +14,6 @@ public final class NeoForgeClientEvents {
     @SubscribeEvent
     public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerBlockEntityRenderer(QuickLinkNeoForge.ITEM_PLUG_BE.get(), ItemPlugBlockEntityRenderer::new);
+        event.registerBlockEntityRenderer(QuickLinkNeoForge.FLUID_PLUG_BE.get(), FluidPlugBlockEntityRenderer::new);
     }
 }
