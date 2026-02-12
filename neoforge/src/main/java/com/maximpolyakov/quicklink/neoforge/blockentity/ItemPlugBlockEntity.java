@@ -1,5 +1,6 @@
 package com.maximpolyakov.quicklink.neoforge.blockentity;
 
+import com.maximpolyakov.quicklink.neoforge.config.QuickLinkConfig;
 import com.maximpolyakov.quicklink.QuickLinkColors;
 import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
@@ -24,7 +25,9 @@ import java.util.List;
 public class ItemPlugBlockEntity extends BlockEntity {
 
     // ===== SPEED =====
-    private static final int MOVE_BATCH = 8; // <<< скорость передачи
+    //private static final int MOVE_BATCH = 8; // <<< скорость передачи
+    int moveBatch = QuickLinkConfig.ITEM_MOVE_BATCH.get();
+    static int period = QuickLinkConfig.ITEM_TICK_PERIOD.get();
 
     // ---- per-side roles ----
     private int plugMask = 0;
@@ -219,7 +222,9 @@ public class ItemPlugBlockEntity extends BlockEntity {
         if (!(level instanceof ServerLevel sl)) return;
         if (!be.enabled) return;
 
-        if ((sl.getGameTime() % 10L) != 0L) return;
+        long gt = sl.getGameTime();
+        //if ((sl.getGameTime() % 10L) != 0L) return;
+        if ((gt % period) != 0L) return;
 
         for (Direction side : Direction.values()) {
             if (be.isPointEnabled(side)) {
@@ -253,7 +258,8 @@ public class ItemPlugBlockEntity extends BlockEntity {
                 Container src = getAttachedContainer(sl, plugPos, plugSide);
                 if (src == null) continue;
 
-                int moved = moveItems(src, dst, MOVE_BATCH);
+                //int moved = moveItems(src, dst, MOVE_BATCH);
+                int moved = moveItems(src, dst, moveBatch);
                 if (moved > 0) {
                     rrIndexBySide[pIdx] = (idx + 1) % plugs.size();
                     setChanged();

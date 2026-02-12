@@ -1,5 +1,7 @@
 package com.maximpolyakov.quicklink.neoforge;
 
+import com.maximpolyakov.quicklink.neoforge.config.QuickLinkConfig;
+import net.neoforged.fml.config.ModConfig;
 import com.maximpolyakov.quicklink.QuickLink;
 import com.maximpolyakov.quicklink.neoforge.block.FluidPlugBlock;
 import com.maximpolyakov.quicklink.neoforge.block.ItemPlugBlock;
@@ -63,6 +65,8 @@ public final class QuickLinkNeoForge {
 
     public QuickLinkNeoForge() {
         QuickLink.init();
+
+        ModLoadingContext.get().getActiveContainer().registerConfig(ModConfig.Type.COMMON, QuickLinkConfig.SPEC);
 
         IEventBus modBus = ModLoadingContext.get().getActiveContainer().getEventBus();
         BLOCKS.register(modBus);

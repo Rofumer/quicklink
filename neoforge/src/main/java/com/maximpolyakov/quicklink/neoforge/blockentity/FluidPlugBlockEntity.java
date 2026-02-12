@@ -1,5 +1,6 @@
 package com.maximpolyakov.quicklink.neoforge.blockentity;
 
+import com.maximpolyakov.quicklink.neoforge.config.QuickLinkConfig;
 import com.maximpolyakov.quicklink.QuickLinkColors;
 import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
@@ -26,9 +27,11 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
     // ==== transfer tuning ====
     // фиксированный объём за попытку (mB)
-    public static final int TRANSFER_MB = 250; // 250 / 500 / 1000
+    //public static final int TRANSFER_MB = 250; // 250 / 500 / 1000
     // попытка раз в N тиков
-    public static final int TICK_PERIOD = 10;
+    //public static final int TICK_PERIOD = 10;
+    static int amountMB = QuickLinkConfig.FLUID_TRANSFER_MB.get();
+    static int period = QuickLinkConfig.FLUID_TICK_PERIOD.get();
     // отладка трансфера (включи если снова "ничего не происходит")
     private static final boolean DBG_TRANSFER = false;
     // =========================
@@ -278,12 +281,14 @@ public class FluidPlugBlockEntity extends BlockEntity {
         if (!be.enabled) return;
 
         long gt = sl.getGameTime();
-        if ((gt % TICK_PERIOD) != 0L) return;
+        //if ((gt % TICK_PERIOD) != 0L) return;
+        if ((gt % period) != 0L) return;
 
         // try for each enabled POINT side
         for (Direction pointSide : Direction.values()) {
             if (be.isPointEnabled(pointSide)) {
-                be.tryTransferOnce(sl, pointSide, TRANSFER_MB);
+                //be.tryTransferOnce(sl, pointSide, TRANSFER_MB);
+                be.tryTransferOnce(sl, pointSide, amountMB);
             }
         }
     }
