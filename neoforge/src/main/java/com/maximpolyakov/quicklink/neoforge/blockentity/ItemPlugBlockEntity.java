@@ -188,8 +188,8 @@ public class ItemPlugBlockEntity extends BlockEntity {
         if (lastRegKey == Integer.MIN_VALUE) return;
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
-        if (lastRegHadPlug) mgr.unregisterPlug(lastRegKey, worldPosition);
-        if (lastRegHadPoint) mgr.unregisterPoint(lastRegKey, worldPosition);
+        if (lastRegHadPlug) mgr.unregisterPlug(sl, lastRegKey, worldPosition);
+        if (lastRegHadPoint) mgr.unregisterPoint(sl, lastRegKey, worldPosition);
 
         lastRegKey = Integer.MIN_VALUE;
         lastRegHadPlug = false;
@@ -206,8 +206,8 @@ public class ItemPlugBlockEntity extends BlockEntity {
         if (lastRegKey != Integer.MIN_VALUE) unregisterFromManager();
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
-        if (nowPlug) mgr.registerPlug(key, worldPosition);
-        if (nowPoint) mgr.registerPoint(key, worldPosition);
+        if (nowPlug) mgr.registerPlug(sl, key, worldPosition);
+        if (nowPoint) mgr.registerPoint(sl, key, worldPosition);
 
         lastRegKey = key;
         lastRegHadPlug = nowPlug;
@@ -238,7 +238,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
         if (dst == null) return;
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
-        List<BlockPos> plugs = mgr.getPlugsSnapshot(getNetworkKey());
+        List<QuickLinkNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(getNetworkKey());
         if (plugs.isEmpty()) return;
 
         int pIdx = dirIndex(pointSide);
@@ -246,16 +246,19 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
         for (int i = 0; i < plugs.size(); i++) {
             int idx = (start + i) % plugs.size();
-            BlockPos plugPos = plugs.get(idx);
+            QuickLinkNetworkManager.GlobalPosRef ref = plugs.get(idx);
+            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
+            if (plugLevel == null) continue;
 
-            BlockEntity other = sl.getBlockEntity(plugPos);
+            BlockPos plugPos = ref.pos();
+            BlockEntity other = plugLevel.getBlockEntity(plugPos);
             if (!(other instanceof ItemPlugBlockEntity plugBe)) continue;
             if (!plugBe.enabled) continue;
 
             for (Direction plugSide : Direction.values()) {
                 if (!plugBe.isPlugEnabled(plugSide)) continue;
 
-                Container src = getAttachedContainer(sl, plugPos, plugSide);
+                Container src = getAttachedContainer(plugLevel, plugPos, plugSide);
                 if (src == null) continue;
 
                 //int moved = moveItems(src, dst, MOVE_BATCH);

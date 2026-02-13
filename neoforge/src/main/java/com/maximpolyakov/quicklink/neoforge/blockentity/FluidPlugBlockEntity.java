@@ -227,8 +227,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
         if (lastRegKey == Integer.MIN_VALUE) return;
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
-        if (lastRegHadPlug) mgr.unregisterPlug(lastRegKey, worldPosition);
-        if (lastRegHadPoint) mgr.unregisterPoint(lastRegKey, worldPosition);
+        if (lastRegHadPlug) mgr.unregisterPlug(sl, lastRegKey, worldPosition);
+        if (lastRegHadPoint) mgr.unregisterPoint(sl, lastRegKey, worldPosition);
 
         lastRegKey = Integer.MIN_VALUE;
         lastRegHadPlug = false;
@@ -252,8 +252,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
         }
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
-        if (nowPlug) mgr.registerPlug(key, worldPosition);
-        if (nowPoint) mgr.registerPoint(key, worldPosition);
+        if (nowPlug) mgr.registerPlug(sl, key, worldPosition);
+        if (nowPoint) mgr.registerPoint(sl, key, worldPosition);
 
         lastRegKey = key;
         lastRegHadPlug = nowPlug;
@@ -312,7 +312,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
         if (dst == null) return;
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
-        List<BlockPos> plugs = mgr.getPlugsSnapshot(key);
+        List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(key);
         if (DBG_TRANSFER) System.out.println("[QLF][DBG] plugs=" + plugs.size());
         if (plugs.isEmpty()) return;
 
@@ -321,9 +321,12 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
         for (int i = 0; i < plugs.size(); i++) {
             int idx = (start + i) % plugs.size();
-            BlockPos plugPos = plugs.get(idx);
+            QuickLinkFluidNetworkManager.GlobalPosRef ref = plugs.get(idx);
+            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
+            if (plugLevel == null) continue;
 
-            BlockEntity other = sl.getBlockEntity(plugPos);
+            BlockPos plugPos = ref.pos();
+            BlockEntity other = plugLevel.getBlockEntity(plugPos);
             if (!(other instanceof FluidPlugBlockEntity plugBe)) continue;
             if (!plugBe.enabled) continue;
 
@@ -338,7 +341,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
             for (Direction plugSide : Direction.values()) {
                 if (!plugBe.isPlugEnabled(plugSide)) continue;
 
-                IFluidHandler src = getAttachedFluidHandler(sl, plugPos, plugSide);
+                IFluidHandler src = getAttachedFluidHandler(plugLevel, plugPos, plugSide);
                 if (DBG_TRANSFER) System.out.println("[QLF][DBG] src=" + (src == null ? "null" : ("tanks=" + src.getTanks()))
                         + " at plug@" + plugPos + " side=" + plugSide);
                 if (src == null) continue;

@@ -2,8 +2,14 @@ package com.maximpolyakov.quicklink.neoforge.network;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.SavedData;
 
 import java.util.*;
@@ -12,14 +18,15 @@ public class QuickLinkFluidNetworkManager extends SavedData {
 
     private static final String DATA_NAME = "quicklink_fluid_networks";
 
-    // key -> set(pos)
-    private final Map<Integer, Set<BlockPos>> plugs = new HashMap<>();
-    private final Map<Integer, Set<BlockPos>> points = new HashMap<>();
+    // key -> set(pos) across all dimensions
+    private final Map<Integer, Set<GlobalPosRef>> plugs = new HashMap<>();
+    private final Map<Integer, Set<GlobalPosRef>> points = new HashMap<>();
 
     public QuickLinkFluidNetworkManager() {}
 
     public static QuickLinkFluidNetworkManager get(ServerLevel level) {
-        return level.getDataStorage().computeIfAbsent(
+        ServerLevel overworld = level.getServer().overworld();
+        return overworld.getDataStorage().computeIfAbsent(
                 new SavedData.Factory<>(
                         QuickLinkFluidNetworkManager::new,
                         QuickLinkFluidNetworkManager::load
@@ -28,120 +35,131 @@ public class QuickLinkFluidNetworkManager extends SavedData {
         );
     }
 
-    /**
-     * 1.21+ loader signature for SavedData.Factory:
-     * (CompoundTag tag, HolderLookup.Provider provider) -> SavedData
-     */
     public static QuickLinkFluidNetworkManager load(CompoundTag tag, HolderLookup.Provider provider) {
         QuickLinkFluidNetworkManager mgr = new QuickLinkFluidNetworkManager();
-
-        CompoundTag tPlugs = tag.getCompound("plugs");
-        for (String k : tPlugs.getAllKeys()) {
-            int key;
-            try {
-                key = Integer.parseInt(k);
-            } catch (NumberFormatException ignored) {
-                continue;
-            }
-            mgr.plugs.put(key, readPosSet(tPlugs.getCompound(k)));
-        }
-
-        CompoundTag tPoints = tag.getCompound("points");
-        for (String k : tPoints.getAllKeys()) {
-            int key;
-            try {
-                key = Integer.parseInt(k);
-            } catch (NumberFormatException ignored) {
-                continue;
-            }
-            mgr.points.put(key, readPosSet(tPoints.getCompound(k)));
-        }
-
+        mgr.plugs.putAll(loadMap(tag.getCompound("plugs")));
+        mgr.points.putAll(loadMap(tag.getCompound("points")));
         return mgr;
     }
 
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider provider) {
-        CompoundTag tPlugs = new CompoundTag();
-        for (Map.Entry<Integer, Set<BlockPos>> e : plugs.entrySet()) {
-            tPlugs.put(Integer.toString(e.getKey()), writePosSet(e.getValue()));
-        }
-        tag.put("plugs", tPlugs);
-
-        CompoundTag tPoints = new CompoundTag();
-        for (Map.Entry<Integer, Set<BlockPos>> e : points.entrySet()) {
-            tPoints.put(Integer.toString(e.getKey()), writePosSet(e.getValue()));
-        }
-        tag.put("points", tPoints);
-
+        tag.put("plugs", saveMap(plugs));
+        tag.put("points", saveMap(points));
         return tag;
     }
 
     // ---------------- API ----------------
 
-    public void registerPlug(int key, BlockPos pos) {
-        plugs.computeIfAbsent(key, kk -> new HashSet<>()).add(pos.immutable());
+    public void registerPlug(ServerLevel level, int key, BlockPos pos) {
+        plugs.computeIfAbsent(key, kk -> new HashSet<>()).add(GlobalPosRef.of(level, pos));
         setDirty();
     }
 
-    public void unregisterPlug(int key, BlockPos pos) {
-        Set<BlockPos> s = plugs.get(key);
+    public void unregisterPlug(ServerLevel level, int key, BlockPos pos) {
+        Set<GlobalPosRef> s = plugs.get(key);
         if (s != null) {
-            s.remove(pos);
+            s.remove(GlobalPosRef.of(level, pos));
             if (s.isEmpty()) plugs.remove(key);
             setDirty();
         }
     }
 
-    public void registerPoint(int key, BlockPos pos) {
-        points.computeIfAbsent(key, kk -> new HashSet<>()).add(pos.immutable());
+    public void registerPoint(ServerLevel level, int key, BlockPos pos) {
+        points.computeIfAbsent(key, kk -> new HashSet<>()).add(GlobalPosRef.of(level, pos));
         setDirty();
     }
 
-    public void unregisterPoint(int key, BlockPos pos) {
-        Set<BlockPos> s = points.get(key);
+    public void unregisterPoint(ServerLevel level, int key, BlockPos pos) {
+        Set<GlobalPosRef> s = points.get(key);
         if (s != null) {
-            s.remove(pos);
+            s.remove(GlobalPosRef.of(level, pos));
             if (s.isEmpty()) points.remove(key);
             setDirty();
         }
     }
 
-    public List<BlockPos> getPlugsSnapshot(int key) {
-        Set<BlockPos> s = plugs.get(key);
+    public List<GlobalPosRef> getPlugsSnapshot(int key) {
+        Set<GlobalPosRef> s = plugs.get(key);
         if (s == null || s.isEmpty()) return Collections.emptyList();
-        return new ArrayList<>(s);
+
+        ArrayList<GlobalPosRef> out = new ArrayList<>(s);
+        out.sort((a, b) -> {
+            int c = a.dimension.location().compareTo(b.dimension.location());
+            if (c != 0) return c;
+            c = Integer.compare(a.pos.getX(), b.pos.getX());
+            if (c != 0) return c;
+            c = Integer.compare(a.pos.getY(), b.pos.getY());
+            if (c != 0) return c;
+            return Integer.compare(a.pos.getZ(), b.pos.getZ());
+        });
+        return out;
     }
 
-    public List<BlockPos> getPointsSnapshot(int key) {
-        Set<BlockPos> s = points.get(key);
+    public List<GlobalPosRef> getPointsSnapshot(int key) {
+        Set<GlobalPosRef> s = points.get(key);
         if (s == null || s.isEmpty()) return Collections.emptyList();
-        return new ArrayList<>(s);
+
+        ArrayList<GlobalPosRef> out = new ArrayList<>(s);
+        out.sort((a, b) -> {
+            int c = a.dimension.location().compareTo(b.dimension.location());
+            if (c != 0) return c;
+            c = Integer.compare(a.pos.getX(), b.pos.getX());
+            if (c != 0) return c;
+            c = Integer.compare(a.pos.getY(), b.pos.getY());
+            if (c != 0) return c;
+            return Integer.compare(a.pos.getZ(), b.pos.getZ());
+        });
+        return out;
     }
 
     // ---------------- NBT helpers ----------------
 
-    private static CompoundTag writePosSet(Set<BlockPos> set) {
-        CompoundTag t = new CompoundTag();
-        int i = 0;
-        for (BlockPos p : set) {
-            CompoundTag pt = new CompoundTag();
-            pt.putInt("x", p.getX());
-            pt.putInt("y", p.getY());
-            pt.putInt("z", p.getZ());
-            t.put("p" + (i++), pt);
+    private static CompoundTag saveMap(Map<Integer, Set<GlobalPosRef>> map) {
+        CompoundTag root = new CompoundTag();
+        for (Map.Entry<Integer, Set<GlobalPosRef>> e : map.entrySet()) {
+            ListTag list = new ListTag();
+            for (GlobalPosRef gp : e.getValue()) {
+                CompoundTag pt = new CompoundTag();
+                pt.putString("dim", gp.dimension.location().toString());
+                pt.putInt("x", gp.pos.getX());
+                pt.putInt("y", gp.pos.getY());
+                pt.putInt("z", gp.pos.getZ());
+                list.add(pt);
+            }
+            root.put(Integer.toString(e.getKey()), list);
         }
-        t.putInt("size", set.size());
-        return t;
+        return root;
     }
 
-    private static Set<BlockPos> readPosSet(CompoundTag t) {
-        Set<BlockPos> out = new HashSet<>();
-        int size = t.getInt("size");
-        for (int i = 0; i < size; i++) {
-            CompoundTag pt = t.getCompound("p" + i);
-            out.add(new BlockPos(pt.getInt("x"), pt.getInt("y"), pt.getInt("z")));
+    private static Map<Integer, Set<GlobalPosRef>> loadMap(CompoundTag root) {
+        Map<Integer, Set<GlobalPosRef>> out = new HashMap<>();
+        for (String k : root.getAllKeys()) {
+            int key;
+            try {
+                key = Integer.parseInt(k);
+            } catch (NumberFormatException ignored) {
+                continue;
+            }
+
+            ListTag list = root.getList(k, Tag.TAG_COMPOUND);
+            HashSet<GlobalPosRef> set = new HashSet<>();
+            for (int i = 0; i < list.size(); i++) {
+                CompoundTag pt = list.getCompound(i);
+                ResourceLocation dimId = ResourceLocation.tryParse(pt.getString("dim"));
+                if (dimId == null) dimId = Level.OVERWORLD.location();
+                ResourceKey<Level> dim = ResourceKey.create(Registries.DIMENSION, dimId);
+                BlockPos pos = new BlockPos(pt.getInt("x"), pt.getInt("y"), pt.getInt("z"));
+                set.add(new GlobalPosRef(dim, pos));
+            }
+            if (!set.isEmpty()) out.put(key, set);
         }
         return out;
+    }
+
+    public record GlobalPosRef(ResourceKey<Level> dimension, BlockPos pos) {
+        public static GlobalPosRef of(ServerLevel level, BlockPos pos) {
+            return new GlobalPosRef(level.dimension(), pos.immutable());
+        }
     }
 }
