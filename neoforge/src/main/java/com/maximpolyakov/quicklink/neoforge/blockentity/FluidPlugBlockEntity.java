@@ -12,6 +12,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -42,9 +43,11 @@ public class FluidPlugBlockEntity extends BlockEntity {
     private int plugMask = 0;
     private int pointMask = 0;
     private int disabledMask = 0;
+    private int infiniteWaterMask = 0;
 
     // round-robin index per POINT side
     private final int[] rrIndexBySide = new int[6];
+    private final long[] waterAccumBySide = new long[6];
 
     // network key
     private QuickLinkColors colors = QuickLinkColors.unset();
@@ -188,6 +191,25 @@ public class FluidPlugBlockEntity extends BlockEntity {
     public int getPlugMask() { return plugMask; }
     public int getPointMask() { return pointMask; }
     public int getDisabledMask() { return disabledMask; }
+
+    public boolean isInfiniteWater(Direction side) {
+        return (infiniteWaterMask & bit(side)) != 0;
+    }
+
+    public boolean toggleInfiniteWater(Direction side) {
+        if (getRole(side) != SideRole.PLUG) return false;
+
+        int idx = dirIndex(side);
+        int b = bit(side);
+        infiniteWaterMask ^= b;
+        if ((infiniteWaterMask & b) == 0) {
+            waterAccumBySide[idx] = 0L;
+        }
+
+        infiniteWaterMask = clampMask6(infiniteWaterMask);
+        setChangedAndSync();
+        return true;
+    }
 
     // ---------------- lifecycle / syncing ----------------
 
@@ -341,6 +363,14 @@ public class FluidPlugBlockEntity extends BlockEntity {
             for (Direction plugSide : Direction.values()) {
                 if (!plugBe.isPlugEnabled(plugSide)) continue;
 
+                if (plugBe.isInfiniteWater(plugSide)) {
+                    if (pushInfiniteWater(dst, plugBe, plugSide)) {
+                        moved = true;
+                        break;
+                    }
+                    continue;
+                }
+
                 IFluidHandler src = getAttachedFluidHandler(plugLevel, plugPos, plugSide);
                 if (DBG_TRANSFER) System.out.println("[QLF][DBG] src=" + (src == null ? "null" : ("tanks=" + src.getTanks()))
                         + " at plug@" + plugPos + " side=" + plugSide);
@@ -361,6 +391,34 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
         rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % plugs.size();
         setChanged();
+    }
+
+    private static boolean pushInfiniteWater(IFluidHandler dst, FluidPlugBlockEntity plugBe, Direction plugSide) {
+        int idx = dirIndex(plugSide);
+
+        long rateMb = QuickLinkConfig.FLUID_INFINITE_MB_PER_TICK.get();
+        int maxChunk = QuickLinkConfig.FLUID_INFINITE_MAX_PUSH_PER_TICK.get();
+
+        plugBe.waterAccumBySide[idx] += rateMb;
+
+        boolean movedAny = false;
+        for (int i = 0; i < 8; i++) {
+            int toMove = (int) Math.min(plugBe.waterAccumBySide[idx], maxChunk);
+            if (toMove <= 0) break;
+
+            FluidStack water = new FluidStack(Fluids.WATER, toMove);
+            int filled = dst.fill(water, IFluidHandler.FluidAction.EXECUTE);
+            if (filled <= 0) break;
+
+            plugBe.waterAccumBySide[idx] -= filled;
+            movedAny = true;
+        }
+
+        if (movedAny) {
+            plugBe.setChanged();
+        }
+
+        return movedAny;
     }
 
     /**
@@ -417,8 +475,10 @@ public class FluidPlugBlockEntity extends BlockEntity {
         tag.putInt("ql_plug_mask", clampMask6(plugMask));
         tag.putInt("ql_point_mask", clampMask6(pointMask));
         tag.putInt("ql_disabled_mask", clampMask6(disabledMask));
+        tag.putInt("ql_inf_water_mask", clampMask6(infiniteWaterMask));
 
         tag.putIntArray("ql_rr_side", rrIndexBySide);
+        tag.putLongArray("ql_inf_water_accum", waterAccumBySide);
     }
 
     @Override
@@ -436,6 +496,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
         plugMask = clampMask6(tag.contains("ql_plug_mask", Tag.TAG_INT) ? tag.getInt("ql_plug_mask") : 0);
         pointMask = clampMask6(tag.contains("ql_point_mask", Tag.TAG_INT) ? tag.getInt("ql_point_mask") : 0);
         disabledMask = clampMask6(tag.contains("ql_disabled_mask", Tag.TAG_INT) ? tag.getInt("ql_disabled_mask") : 0);
+        infiniteWaterMask = clampMask6(tag.contains("ql_inf_water_mask", Tag.TAG_INT) ? tag.getInt("ql_inf_water_mask") : 0);
 
         if (tag.contains("ql_rr_side", Tag.TAG_INT_ARRAY)) {
             int[] arr = tag.getIntArray("ql_rr_side");
@@ -446,8 +507,20 @@ public class FluidPlugBlockEntity extends BlockEntity {
             for (int i = 0; i < 6; i++) rrIndexBySide[i] = 0;
         }
 
+        if (tag.contains("ql_inf_water_accum", Tag.TAG_LONG_ARRAY)) {
+            long[] arr = tag.getLongArray("ql_inf_water_accum");
+            for (int i = 0; i < 6; i++) {
+                waterAccumBySide[i] = (arr != null && arr.length > i) ? Math.max(0L, arr[i]) : 0L;
+            }
+        } else {
+            for (int i = 0; i < 6; i++) waterAccumBySide[i] = 0L;
+        }
+
         // invariant: prefer POINT if both set (old/bad data)
         int both = plugMask & pointMask;
         if (both != 0) plugMask &= ~both;
+
+        // keep infinite-water only on PLUG sides
+        infiniteWaterMask &= plugMask;
     }
 }

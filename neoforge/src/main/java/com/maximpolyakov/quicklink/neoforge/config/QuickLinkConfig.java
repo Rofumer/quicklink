@@ -13,6 +13,8 @@ public final class QuickLinkConfig {
     // ===== Fluids =====
     public static final ModConfigSpec.IntValue FLUID_TICK_PERIOD; // раз в N тиков
     public static final ModConfigSpec.IntValue FLUID_TRANSFER_MB; // mB за попытку
+    public static final ModConfigSpec.IntValue FLUID_INFINITE_MB_PER_TICK;
+    public static final ModConfigSpec.IntValue FLUID_INFINITE_MAX_PUSH_PER_TICK;
 
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
@@ -35,6 +37,14 @@ public final class QuickLinkConfig {
         FLUID_TRANSFER_MB = b
                 .comment("How many millibuckets to transfer per attempt.")
                 .defineInRange("transferMb", 250, 1, 8000);
+
+        FLUID_INFINITE_MB_PER_TICK = b
+                .comment("Infinite water source speed in millibuckets per tick.")
+                .defineInRange("infiniteMbPerTick", 250, 1, 1_000_000);
+
+        FLUID_INFINITE_MAX_PUSH_PER_TICK = b
+                .comment("Max millibuckets pushed in a single infinite-source fill operation.")
+                .defineInRange("infiniteMaxPushPerTick", 4000, 250, 1_000_000);
         b.pop();
 
         SPEC = b.build();

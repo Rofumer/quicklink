@@ -11,6 +11,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.DyeItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
 import net.minecraft.world.level.block.RenderShape;
@@ -57,7 +58,7 @@ public class FluidPlugBlock extends BaseEntityBlock {
                                            Player player, InteractionHand hand, BlockHitResult hit) {
 
         if (level.isClientSide) {
-            if (stack.getItem() instanceof DyeItem || stack.isEmpty()) {
+            if (stack.getItem() instanceof DyeItem || stack.isEmpty() || stack.is(Items.WATER_BUCKET)) {
                 return ItemInteractionResult.SUCCESS;
             }
             return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
@@ -85,6 +86,19 @@ public class FluidPlugBlock extends BaseEntityBlock {
                 var role = be.cycleRole(face);
                 boolean on = (role != FluidPlugBlockEntity.SideRole.NONE) && be.isSideEnabled(face);
                 player.sendSystemMessage(Component.literal("Side " + face + ": " + role + (role == FluidPlugBlockEntity.SideRole.NONE ? "" : (" (" + (on ? "ON" : "OFF") + ")"))));
+            }
+            return ItemInteractionResult.CONSUME;
+        }
+
+
+        if (stack.is(Items.WATER_BUCKET)) {
+            boolean toggled = be.toggleInfiniteWater(face);
+            if (!toggled) {
+                player.sendSystemMessage(Component.literal("Infinite water requires PLUG role on side " + face));
+            } else {
+                player.sendSystemMessage(Component.literal(
+                        "Infinite water on " + face + ": " + (be.isInfiniteWater(face) ? "ON" : "OFF")
+                ));
             }
             return ItemInteractionResult.CONSUME;
         }
