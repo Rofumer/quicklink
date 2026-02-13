@@ -16,6 +16,10 @@ public final class QuickLinkConfig {
     public static final ModConfigSpec.IntValue FLUID_INFINITE_MB_PER_TICK;
     public static final ModConfigSpec.IntValue FLUID_INFINITE_MAX_PUSH_PER_TICK;
 
+    // ===== Energy =====
+    public static final ModConfigSpec.IntValue ENERGY_TICK_PERIOD;
+    public static final ModConfigSpec.IntValue ENERGY_TRANSFER_FE;
+
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
 
@@ -45,6 +49,16 @@ public final class QuickLinkConfig {
         FLUID_INFINITE_MAX_PUSH_PER_TICK = b
                 .comment("Max millibuckets pushed in a single infinite-source fill operation.")
                 .defineInRange("infiniteMaxPushPerTick", 4000, 250, 1_000_000);
+        b.pop();
+
+        b.push("energy");
+        ENERGY_TICK_PERIOD = b
+                .comment("Attempt period in ticks (20 ticks = 1 second). Lower = faster.")
+                .defineInRange("tickPeriod", 10, 1, 200);
+
+        ENERGY_TRANSFER_FE = b
+                .comment("How much FE to transfer per attempt.")
+                .defineInRange("transferFe", 1000, 1, 1_000_000);
         b.pop();
 
         SPEC = b.build();

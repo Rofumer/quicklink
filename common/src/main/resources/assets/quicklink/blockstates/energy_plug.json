@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "quicklink:block/energy_plug" }
+  }
+}

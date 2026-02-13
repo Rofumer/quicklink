@@ -1,0 +1,6 @@
+{
+  "parent": "block/cube_all",
+  "textures": {
+    "all": "quicklink:block/energy_plug"
+  }
+}

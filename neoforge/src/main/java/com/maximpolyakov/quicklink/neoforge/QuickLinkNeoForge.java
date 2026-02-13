@@ -4,7 +4,9 @@ import com.maximpolyakov.quicklink.neoforge.config.QuickLinkConfig;
 import net.neoforged.fml.config.ModConfig;
 import com.maximpolyakov.quicklink.QuickLink;
 import com.maximpolyakov.quicklink.neoforge.block.FluidPlugBlock;
+import com.maximpolyakov.quicklink.neoforge.block.EnergyPlugBlock;
 import com.maximpolyakov.quicklink.neoforge.block.ItemPlugBlock;
+import com.maximpolyakov.quicklink.neoforge.blockentity.EnergyPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.blockentity.FluidPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.blockentity.ItemPlugBlockEntity;
 import net.minecraft.core.registries.Registries;
@@ -62,6 +64,23 @@ public final class QuickLinkNeoForge {
                             .build(null)
             );
 
+    public static final DeferredHolder<Block, EnergyPlugBlock> ENERGY_PLUG_BLOCK = BLOCKS.register(
+            "energy_plug",
+            () -> new EnergyPlugBlock(BlockBehaviour.Properties.of().strength(2.0F).noOcclusion())
+    );
+
+    public static final DeferredHolder<Item, BlockItem> ENERGY_PLUG_ITEM = ITEMS.register(
+            "energy_plug",
+            () -> new BlockItem(ENERGY_PLUG_BLOCK.get(), new Item.Properties())
+    );
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<EnergyPlugBlockEntity>> ENERGY_PLUG_BE =
+            BLOCK_ENTITIES.register("energy_plug",
+                    () -> BlockEntityType.Builder
+                            .of(EnergyPlugBlockEntity::new, ENERGY_PLUG_BLOCK.get())
+                            .build(null)
+            );
+
 
     public QuickLinkNeoForge() {
         QuickLink.init();
@@ -79,7 +98,8 @@ public final class QuickLinkNeoForge {
     private void addCreative(BuildCreativeModeTabContentsEvent e) {
         if (e.getTabKey() == CreativeModeTabs.FUNCTIONAL_BLOCKS) {
             e.accept(ITEM_PLUG_ITEM.get());
-            e.accept(FLUID_PLUG_ITEM.get()); // <-- добавь эту строку
+            e.accept(FLUID_PLUG_ITEM.get());
+            e.accept(ENERGY_PLUG_ITEM.get());
         }
     }
 }

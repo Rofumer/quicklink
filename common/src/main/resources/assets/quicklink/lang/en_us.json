@@ -1,4 +1,5 @@
 {
   "block.quicklink.item_plug": "Item Plug",
-  "block.quicklink.fluid_plug": "Fluid Plug"
+  "block.quicklink.fluid_plug": "Fluid Plug",
+  "block.quicklink.energy_plug": "Energy Plug"
 }

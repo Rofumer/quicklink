@@ -15,5 +15,6 @@ public final class NeoForgeClientEvents {
     public static void registerRenderers(EntityRenderersEvent.RegisterRenderers event) {
         event.registerBlockEntityRenderer(QuickLinkNeoForge.ITEM_PLUG_BE.get(), ItemPlugBlockEntityRenderer::new);
         event.registerBlockEntityRenderer(QuickLinkNeoForge.FLUID_PLUG_BE.get(), FluidPlugBlockEntityRenderer::new);
+        event.registerBlockEntityRenderer(QuickLinkNeoForge.ENERGY_PLUG_BE.get(), EnergyPlugBlockEntityRenderer::new);
     }
 }
