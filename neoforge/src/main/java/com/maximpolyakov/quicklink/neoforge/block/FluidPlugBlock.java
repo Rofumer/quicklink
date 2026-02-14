@@ -1,16 +1,22 @@
 package com.maximpolyakov.quicklink.neoforge.block;
 
+import com.maximpolyakov.quicklink.QuickLinkColors;
+import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
 import com.maximpolyakov.quicklink.neoforge.blockentity.FluidPlugBlockEntity;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.ItemInteractionResult;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.DyeItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
@@ -19,10 +25,14 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityTicker;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.loot.LootParams;
+import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jetbrains.annotations.Nullable;
+
+import java.util.List;
 
 public class FluidPlugBlock extends BaseEntityBlock {
 
@@ -130,6 +140,36 @@ public class FluidPlugBlock extends BaseEntityBlock {
         be.setColor(slot, colorId);
 
         return ItemInteractionResult.CONSUME;
+    }
+
+    @Override
+    public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {
+        super.setPlacedBy(level, pos, state, placer, stack);
+        if (level.isClientSide) return;
+
+        BlockEntity be0 = level.getBlockEntity(pos);
+        if (!(be0 instanceof FluidPlugBlockEntity be)) return;
+
+        CustomData customData = stack.get(DataComponents.CUSTOM_DATA);
+        if (customData == null) return;
+
+        CompoundTag tag = customData.copyTag();
+        if (tag.contains(QuickLinkNbt.COLORS)) {
+            be.setColors(QuickLinkColors.unpack(tag.getInt(QuickLinkNbt.COLORS)));
+        }
+    }
+
+    @Override
+    protected List<ItemStack> getDrops(BlockState state, LootParams.Builder params) {
+        ItemStack drop = new ItemStack(asItem());
+        BlockEntity be0 = params.getOptionalParameter(LootContextParams.BLOCK_ENTITY);
+        if (be0 instanceof FluidPlugBlockEntity be) {
+            CustomData existing = drop.get(DataComponents.CUSTOM_DATA);
+            CompoundTag tag = (existing == null) ? new CompoundTag() : existing.copyTag();
+            tag.putInt(QuickLinkNbt.COLORS, be.getColors().pack());
+            drop.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
+        }
+        return List.of(drop);
     }
 
     private static int quadSlotFromHit(Direction face, double lx, double ly, double lz) {

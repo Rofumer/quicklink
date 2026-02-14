@@ -53,6 +53,12 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
     public QuickLinkColors getColors() { return colors; }
 
+    public void setColors(QuickLinkColors colors) {
+        this.colors = (colors == null) ? QuickLinkColors.unset() : colors;
+        setChangedAndSync();
+        syncRegistration();
+    }
+
     public void setColor(int slot, byte colorId) {
         int oldKey = getNetworkKey();
         colors = colors.with(slot, colorId);

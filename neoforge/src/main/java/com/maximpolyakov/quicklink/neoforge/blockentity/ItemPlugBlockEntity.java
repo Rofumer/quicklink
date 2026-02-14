@@ -99,12 +99,15 @@ public class ItemPlugBlockEntity extends BlockEntity {
     // roles
     // ------------------------------------------------
 
-    public enum SideRole { NONE, PLUG, POINT }
+    public enum SideRole { NONE, PLUG, POINT, BOTH }
 
     public SideRole getRole(Direction side) {
         int b = bit(side);
-        if ((plugMask & b) != 0) return SideRole.PLUG;
-        if ((pointMask & b) != 0) return SideRole.POINT;
+        boolean p = (plugMask & b) != 0;
+        boolean t = (pointMask & b) != 0;
+        if (p && t) return SideRole.BOTH;
+        if (p) return SideRole.PLUG;
+        if (t) return SideRole.POINT;
         return SideRole.NONE;
     }
 
@@ -113,11 +116,13 @@ public class ItemPlugBlockEntity extends BlockEntity {
     }
 
     public boolean isPlugEnabled(Direction side) {
-        return getRole(side) == SideRole.PLUG && isSideEnabled(side);
+        SideRole role = getRole(side);
+        return (role == SideRole.PLUG || role == SideRole.BOTH) && isSideEnabled(side);
     }
 
     public boolean isPointEnabled(Direction side) {
-        return getRole(side) == SideRole.POINT && isSideEnabled(side);
+        SideRole role = getRole(side);
+        return (role == SideRole.POINT || role == SideRole.BOTH) && isSideEnabled(side);
     }
 
     public SideRole cycleRole(Direction side) {
@@ -125,7 +130,8 @@ public class ItemPlugBlockEntity extends BlockEntity {
         SideRole next = switch (cur) {
             case NONE -> SideRole.PLUG;
             case PLUG -> SideRole.POINT;
-            case POINT -> SideRole.NONE;
+            case POINT -> SideRole.BOTH;
+            case BOTH -> SideRole.NONE;
         };
 
         int b = bit(side);
@@ -134,6 +140,10 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
         if (next == SideRole.PLUG) plugMask |= b;
         if (next == SideRole.POINT) pointMask |= b;
+        if (next == SideRole.BOTH) {
+            plugMask |= b;
+            pointMask |= b;
+        }
         if (next == SideRole.NONE) disabledMask &= ~b;
 
         plugMask = clampMask6(plugMask);
@@ -584,9 +594,6 @@ public class ItemPlugBlockEntity extends BlockEntity {
         for (int i = 0; i < 6; i++) {
             rrIndexBySide[i] = (arr.length > i) ? Math.max(0, arr[i]) : 0;
         }
-
-        int both = plugMask & pointMask;
-        if (both != 0) plugMask &= ~both;
     }
 
     @Override

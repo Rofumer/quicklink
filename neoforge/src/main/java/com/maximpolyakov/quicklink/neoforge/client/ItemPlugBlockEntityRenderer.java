@@ -101,14 +101,22 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
             boolean on = be.isSideEnabled(face);
 
             if (on) {
-                if (role == ItemPlugBlockEntity.SideRole.PLUG) {
-                    drawFrame(vc, pose, mat, face, EPS, U0, U1, V0, V1,
+                switch (role) {
+                    case PLUG -> drawFrame(vc, pose, mat, face, EPS, U0, U1, V0, V1,
                             PLUG_R, PLUG_G, PLUG_B, FRAME_ALPHA,
                             FRAME_THICK, light, overlay);
-                } else { // POINT
-                    drawFrame(vc, pose, mat, face, EPS, U0, U1, V0, V1,
+                    case POINT -> drawFrame(vc, pose, mat, face, EPS, U0, U1, V0, V1,
                             POINT_R, POINT_G, POINT_B, FRAME_ALPHA,
                             FRAME_THICK, light, overlay);
+                    case BOTH -> {
+                        drawFrame(vc, pose, mat, face, EPS, U0, U1, V0, V1,
+                                PLUG_R, PLUG_G, PLUG_B, FRAME_ALPHA,
+                                FRAME_THICK, light, overlay);
+                        drawFrame(vc, pose, mat, face, EPS, U0, U1, V0, V1,
+                                POINT_R, POINT_G, POINT_B, FRAME_ALPHA,
+                                FRAME_THICK * 0.55f, light, overlay);
+                    }
+                    case NONE -> { }
                 }
             } else {
                 // disabled: red dashed X
