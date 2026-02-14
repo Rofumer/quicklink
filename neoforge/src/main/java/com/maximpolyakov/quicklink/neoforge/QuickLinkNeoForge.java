@@ -39,7 +39,7 @@ public final class QuickLinkNeoForge {
 
     public static final DeferredHolder<Block, Block> ITEM_PLUG =
             BLOCKS.register("item_plug",
-                    () -> new ItemPlugBlock(Block.Properties.of().strength(1.5f).noOcclusion()));
+                    () -> new ItemPlugBlock(Block.Properties.of().strength(0.3f).noOcclusion()));
 
 
     public static final DeferredHolder<Item, Item> ITEM_PLUG_ITEM =
@@ -51,7 +51,7 @@ public final class QuickLinkNeoForge {
 
     public static final DeferredHolder<Block, FluidPlugBlock> FLUID_PLUG_BLOCK = BLOCKS.register(
             "fluid_plug",
-            () -> new FluidPlugBlock(BlockBehaviour.Properties.of().strength(2.0F).noOcclusion())
+            () -> new FluidPlugBlock(BlockBehaviour.Properties.of().strength(0.3F).noOcclusion())
     );
 
     public static final DeferredHolder<Item, BlockItem> FLUID_PLUG_ITEM = ITEMS.register(
@@ -68,7 +68,7 @@ public final class QuickLinkNeoForge {
 
     public static final DeferredHolder<Block, EnergyPlugBlock> ENERGY_PLUG_BLOCK = BLOCKS.register(
             "energy_plug",
-            () -> new EnergyPlugBlock(BlockBehaviour.Properties.of().strength(2.0F).noOcclusion())
+            () -> new EnergyPlugBlock(BlockBehaviour.Properties.of().strength(0.3F).noOcclusion())
     );
 
     public static final DeferredHolder<Item, BlockItem> ENERGY_PLUG_ITEM = ITEMS.register(
