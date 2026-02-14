@@ -391,7 +391,18 @@ public class FluidPlugBlockEntity extends BlockEntity {
             if (!(other instanceof FluidPlugBlockEntity plugBe) || !plugBe.enabled) continue;
 
             for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide) || plugBe.isInfiniteWater(plugSide)) continue;
+                if (!plugBe.isPlugEnabled(plugSide)) continue;
+
+                if (plugBe.isInfiniteWater(plugSide)) {
+                    if (match != null && !match.isEmpty() && !match.is(Fluids.WATER)) continue;
+
+                    FluidStack provided = new FluidStack(Fluids.WATER, amount);
+                    if (action.execute()) {
+                        rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % plugs.size();
+                        setChanged();
+                    }
+                    return provided;
+                }
 
                 IFluidHandler src = getAttachedFluidHandler(plugLevel, ref.pos(), plugSide);
                 if (src == null) continue;
@@ -573,7 +584,10 @@ public class FluidPlugBlockEntity extends BlockEntity {
         public int getTanks() { return 1; }
 
         @Override
-        public FluidStack getFluidInTank(int tank) { return FluidStack.EMPTY; }
+        public FluidStack getFluidInTank(int tank) {
+            if (tank != 0) return FluidStack.EMPTY;
+            return owner.peekNetworkFluid(side);
+        }
 
         @Override
         public int getTankCapacity(int tank) { return Integer.MAX_VALUE; }
@@ -598,6 +612,38 @@ public class FluidPlugBlockEntity extends BlockEntity {
         public FluidStack drain(int maxDrain, FluidAction action) {
             return owner.drainFromNetwork(side, maxDrain, null, action);
         }
+    }
+
+    private FluidStack peekNetworkFluid(Direction outputSide) {
+        if (!isPointEnabled(outputSide) || !(level instanceof ServerLevel sl)) return FluidStack.EMPTY;
+
+        QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
+        List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(getNetworkKey());
+        if (plugs.isEmpty()) return FluidStack.EMPTY;
+
+        for (QuickLinkFluidNetworkManager.GlobalPosRef ref : plugs) {
+            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
+            if (plugLevel == null) continue;
+
+            BlockEntity other = plugLevel.getBlockEntity(ref.pos());
+            if (!(other instanceof FluidPlugBlockEntity plugBe) || !plugBe.enabled) continue;
+
+            for (Direction plugSide : Direction.values()) {
+                if (!plugBe.isPlugEnabled(plugSide)) continue;
+
+                if (plugBe.isInfiniteWater(plugSide)) {
+                    return new FluidStack(Fluids.WATER, 1);
+                }
+
+                IFluidHandler src = getAttachedFluidHandler(plugLevel, ref.pos(), plugSide);
+                if (src == null) continue;
+
+                FluidStack simulated = src.drain(1, IFluidHandler.FluidAction.SIMULATE);
+                if (!simulated.isEmpty()) return simulated;
+            }
+        }
+
+        return FluidStack.EMPTY;
     }
 
     // ---------------- NBT ----------------
