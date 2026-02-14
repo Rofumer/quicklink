@@ -117,7 +117,7 @@ public class FluidPlugBlock extends BaseEntityBlock {
         if (stack.is(Items.WATER_BUCKET)) {
             boolean toggled = be.toggleInfiniteWater(face);
             if (!toggled) {
-                player.sendSystemMessage(Component.literal("Infinite water requires PLUG role on side " + face));
+                player.sendSystemMessage(Component.literal("Infinite water requires PLUG or BOTH role on side " + face));
             } else {
                 player.sendSystemMessage(Component.literal(
                         "Infinite water on " + face + ": " + (be.isInfiniteWater(face) ? "ON" : "OFF")

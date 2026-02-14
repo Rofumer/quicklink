@@ -119,13 +119,14 @@ public class FluidPlugBlockEntity extends BlockEntity {
         }
     }
 
-    public enum SideRole { NONE, PLUG, POINT }
+    public enum SideRole { NONE, PLUG, POINT, BOTH }
 
     public SideRole getRole(Direction side) {
         int b = bit(side);
         boolean p = (plugMask & b) != 0;
         boolean t = (pointMask & b) != 0;
 
+        if (p && t) return SideRole.BOTH;
         if (p) return SideRole.PLUG;
         if (t) return SideRole.POINT;
         return SideRole.NONE;
@@ -137,22 +138,25 @@ public class FluidPlugBlockEntity extends BlockEntity {
     }
 
     public boolean isPlugEnabled(Direction side) {
-        return getRole(side) == SideRole.PLUG && isSideEnabled(side);
+        SideRole role = getRole(side);
+        return (role == SideRole.PLUG || role == SideRole.BOTH) && isSideEnabled(side);
     }
 
     public boolean isPointEnabled(Direction side) {
-        return getRole(side) == SideRole.POINT && isSideEnabled(side);
+        SideRole role = getRole(side);
+        return (role == SideRole.POINT || role == SideRole.BOTH) && isSideEnabled(side);
     }
 
     /**
-     * NONE -> PLUG -> POINT -> NONE
+     * NONE -> PLUG -> POINT -> BOTH -> NONE
      */
     public SideRole cycleRole(Direction side) {
         SideRole cur = getRole(side);
         SideRole next = switch (cur) {
             case NONE -> SideRole.PLUG;
             case PLUG -> SideRole.POINT;
-            case POINT -> SideRole.NONE;
+            case POINT -> SideRole.BOTH;
+            case BOTH -> SideRole.NONE;
         };
 
         int b = bit(side);
@@ -163,6 +167,9 @@ public class FluidPlugBlockEntity extends BlockEntity {
         if (next == SideRole.PLUG) {
             plugMask |= b;
         } else if (next == SideRole.POINT) {
+            pointMask |= b;
+        } else if (next == SideRole.BOTH) {
+            plugMask |= b;
             pointMask |= b;
         } else {
             disabledMask &= ~b;
@@ -201,7 +208,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
     }
 
     public boolean toggleInfiniteWater(Direction side) {
-        if (getRole(side) != SideRole.PLUG) return false;
+        SideRole role = getRole(side);
+        if (role != SideRole.PLUG && role != SideRole.BOTH) return false;
 
         int idx = dirIndex(side);
         int b = bit(side);
@@ -698,10 +706,6 @@ public class FluidPlugBlockEntity extends BlockEntity {
         } else {
             for (int i = 0; i < 6; i++) waterAccumBySide[i] = 0L;
         }
-
-        // invariant: prefer POINT if both set (old/bad data)
-        int both = plugMask & pointMask;
-        if (both != 0) plugMask &= ~both;
 
         // keep infinite-water only on PLUG sides
         infiniteWaterMask &= plugMask;
