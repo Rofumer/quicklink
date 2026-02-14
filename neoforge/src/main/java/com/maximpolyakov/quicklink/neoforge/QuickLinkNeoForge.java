@@ -19,6 +19,8 @@ import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModLoadingContext;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.neoforge.capabilities.Capabilities;
+import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 import net.neoforged.neoforge.registries.DeferredHolder;
 import net.neoforged.neoforge.registries.DeferredRegister;
@@ -93,6 +95,12 @@ public final class QuickLinkNeoForge {
         BLOCK_ENTITIES.register(modBus);
 
         modBus.addListener(this::addCreative);
+        modBus.addListener(this::registerCapabilities);
+    }
+
+    private void registerCapabilities(RegisterCapabilitiesEvent event) {
+        event.registerBlockEntity(Capabilities.EnergyStorage.BLOCK, ENERGY_PLUG_BE.get(),
+                (be, side) -> be.getExternalEnergyStorage(side));
     }
 
     private void addCreative(BuildCreativeModeTabContentsEvent e) {

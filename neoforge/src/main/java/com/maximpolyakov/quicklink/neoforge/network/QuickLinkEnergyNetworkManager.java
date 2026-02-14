@@ -70,6 +70,24 @@ public class QuickLinkEnergyNetworkManager extends SavedData {
         return out;
     }
 
+
+    public List<GlobalPosRef> getPointsSnapshot(int key) {
+        Set<GlobalPosRef> set = pointsByKey.get(key);
+        if (set == null || set.isEmpty()) return Collections.emptyList();
+
+        ArrayList<GlobalPosRef> out = new ArrayList<>(set);
+        out.sort((a, b) -> {
+            int c = a.dimension.location().compareTo(b.dimension.location());
+            if (c != 0) return c;
+            c = Integer.compare(a.pos.getX(), b.pos.getX());
+            if (c != 0) return c;
+            c = Integer.compare(a.pos.getY(), b.pos.getY());
+            if (c != 0) return c;
+            return Integer.compare(a.pos.getZ(), b.pos.getZ());
+        });
+        return out;
+    }
+
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) {
         tag.put("plugs", saveMap(plugsByKey));
