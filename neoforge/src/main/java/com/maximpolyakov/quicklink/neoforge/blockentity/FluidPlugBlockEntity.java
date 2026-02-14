@@ -59,9 +59,13 @@ public class FluidPlugBlockEntity extends BlockEntity {
     private int lastRegKey = Integer.MIN_VALUE;
     private boolean lastRegHadPlug = false;
     private boolean lastRegHadPoint = false;
+    private final IFluidHandler[] sideCapabilities = new IFluidHandler[6];
 
     public FluidPlugBlockEntity(BlockPos pos, BlockState state) {
         super(QuickLinkNeoForge.FLUID_PLUG_BE.get(), pos, state);
+        for (Direction side : Direction.values()) {
+            sideCapabilities[dirIndex(side)] = new SideFluidHandler(this, side);
+        }
     }
 
     // ---------------- helpers ----------------
@@ -315,6 +319,99 @@ public class FluidPlugBlockEntity extends BlockEntity {
         }
     }
 
+    @Nullable
+    public IFluidHandler getExternalFluidHandler(@Nullable Direction side) {
+        if (side == null) return null;
+        if (!isSideEnabled(side)) return null;
+        if (getRole(side) == SideRole.NONE) return null;
+        return sideCapabilities[dirIndex(side)];
+    }
+
+    private int fillIntoNetwork(Direction inputSide, FluidStack resource, IFluidHandler.FluidAction action) {
+        if (resource.isEmpty() || !isPlugEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
+
+        QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
+        List<QuickLinkFluidNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(getNetworkKey());
+        if (points.isEmpty()) return 0;
+
+        int moved = 0;
+        int left = resource.getAmount();
+        int start = rrIndexBySide[dirIndex(inputSide)];
+
+        for (int i = 0; i < points.size() && left > 0; i++) {
+            int idx = (start + i) % points.size();
+            QuickLinkFluidNetworkManager.GlobalPosRef ref = points.get(idx);
+            ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
+            if (pointLevel == null) continue;
+
+            BlockEntity other = pointLevel.getBlockEntity(ref.pos());
+            if (!(other instanceof FluidPlugBlockEntity pointBe) || !pointBe.enabled) continue;
+
+            for (Direction pointSide : Direction.values()) {
+                if (!pointBe.isPointEnabled(pointSide)) continue;
+                IFluidHandler dst = getAttachedFluidHandler(pointLevel, ref.pos(), pointSide);
+                if (dst == null) continue;
+
+                FluidStack toFill = resource.copy();
+                toFill.setAmount(left);
+                int accepted = dst.fill(toFill, action);
+                if (accepted <= 0) continue;
+
+                moved += accepted;
+                left -= accepted;
+
+                if (action.execute()) {
+                    rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % points.size();
+                    setChanged();
+                }
+
+                if (left <= 0) break;
+            }
+        }
+
+        return moved;
+    }
+
+    private FluidStack drainFromNetwork(Direction outputSide, int amount, @Nullable FluidStack match, IFluidHandler.FluidAction action) {
+        if (amount <= 0 || !isPointEnabled(outputSide) || !(level instanceof ServerLevel sl)) return FluidStack.EMPTY;
+
+        QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
+        List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(getNetworkKey());
+        if (plugs.isEmpty()) return FluidStack.EMPTY;
+
+        int start = rrIndexBySide[dirIndex(outputSide)];
+
+        for (int i = 0; i < plugs.size(); i++) {
+            int idx = (start + i) % plugs.size();
+            QuickLinkFluidNetworkManager.GlobalPosRef ref = plugs.get(idx);
+            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
+            if (plugLevel == null) continue;
+
+            BlockEntity other = plugLevel.getBlockEntity(ref.pos());
+            if (!(other instanceof FluidPlugBlockEntity plugBe) || !plugBe.enabled) continue;
+
+            for (Direction plugSide : Direction.values()) {
+                if (!plugBe.isPlugEnabled(plugSide) || plugBe.isInfiniteWater(plugSide)) continue;
+
+                IFluidHandler src = getAttachedFluidHandler(plugLevel, ref.pos(), plugSide);
+                if (src == null) continue;
+
+                FluidStack drained = (match == null)
+                        ? src.drain(amount, action)
+                        : src.drain(match.copyWithAmount(amount), action);
+                if (drained.isEmpty()) continue;
+
+                if (action.execute()) {
+                    rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % plugs.size();
+                    setChanged();
+                }
+                return drained;
+            }
+        }
+
+        return FluidStack.EMPTY;
+    }
+
     /**
      * For one POINT side: pull up to amountMB from any PLUG side of any plug-block in same network
      * into destination handler attached to this pointSide.
@@ -461,6 +558,46 @@ public class FluidPlugBlockEntity extends BlockEntity {
         int filled = dst.fill(drained, IFluidHandler.FluidAction.EXECUTE);
         if (DBG_TRANSFER) System.out.println("[QLF][DBG] drained=" + drained.getAmount() + " filled=" + filled);
         return filled > 0;
+    }
+
+    private static final class SideFluidHandler implements IFluidHandler {
+        private final FluidPlugBlockEntity owner;
+        private final Direction side;
+
+        private SideFluidHandler(FluidPlugBlockEntity owner, Direction side) {
+            this.owner = owner;
+            this.side = side;
+        }
+
+        @Override
+        public int getTanks() { return 1; }
+
+        @Override
+        public FluidStack getFluidInTank(int tank) { return FluidStack.EMPTY; }
+
+        @Override
+        public int getTankCapacity(int tank) { return Integer.MAX_VALUE; }
+
+        @Override
+        public boolean isFluidValid(int tank, FluidStack stack) {
+            return owner.isPlugEnabled(side);
+        }
+
+        @Override
+        public int fill(FluidStack resource, FluidAction action) {
+            return owner.fillIntoNetwork(side, resource, action);
+        }
+
+        @Override
+        public FluidStack drain(FluidStack resource, FluidAction action) {
+            if (resource.isEmpty()) return FluidStack.EMPTY;
+            return owner.drainFromNetwork(side, resource.getAmount(), resource, action);
+        }
+
+        @Override
+        public FluidStack drain(int maxDrain, FluidAction action) {
+            return owner.drainFromNetwork(side, maxDrain, null, action);
+        }
     }
 
     // ---------------- NBT ----------------

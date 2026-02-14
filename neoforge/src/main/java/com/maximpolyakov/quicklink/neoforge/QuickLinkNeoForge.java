@@ -99,6 +99,10 @@ public final class QuickLinkNeoForge {
     }
 
     private void registerCapabilities(RegisterCapabilitiesEvent event) {
+        event.registerBlockEntity(Capabilities.ItemHandler.BLOCK, ITEM_PLUG_BE.get(),
+                (be, side) -> be.getExternalItemHandler(side));
+        event.registerBlockEntity(Capabilities.FluidHandler.BLOCK, FLUID_PLUG_BE.get(),
+                (be, side) -> be.getExternalFluidHandler(side));
         event.registerBlockEntity(Capabilities.EnergyStorage.BLOCK, ENERGY_PLUG_BE.get(),
                 (be, side) -> be.getExternalEnergyStorage(side));
     }

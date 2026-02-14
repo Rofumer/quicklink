@@ -18,6 +18,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.HopperBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.neoforged.neoforge.capabilities.Capabilities;
+import net.neoforged.neoforge.items.IItemHandler;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -42,9 +44,13 @@ public class ItemPlugBlockEntity extends BlockEntity {
     private int lastRegKey = Integer.MIN_VALUE;
     private boolean lastRegHadPlug = false;
     private boolean lastRegHadPoint = false;
+    private final IItemHandler[] sideCapabilities = new IItemHandler[6];
 
     public ItemPlugBlockEntity(BlockPos pos, BlockState state) {
         super(QuickLinkNeoForge.ITEM_PLUG_BE.get(), pos, state);
+        for (Direction side : Direction.values()) {
+            sideCapabilities[dirIndex(side)] = new SideItemHandler(this, side);
+        }
     }
 
     // ------------------------------------------------
@@ -233,8 +239,95 @@ public class ItemPlugBlockEntity extends BlockEntity {
         }
     }
 
+    @Nullable
+    public IItemHandler getExternalItemHandler(@Nullable Direction side) {
+        if (side == null) return null;
+        if (!isSideEnabled(side)) return null;
+        if (getRole(side) == SideRole.NONE) return null;
+        return sideCapabilities[dirIndex(side)];
+    }
+
+    private int receiveIntoNetwork(Direction inputSide, ItemStack stack, boolean simulate) {
+        if (stack.isEmpty() || !isPlugEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
+
+        QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
+        List<QuickLinkNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(getNetworkKey());
+        if (points.isEmpty()) return 0;
+
+        ItemStack remaining = stack.copy();
+        int moved = 0;
+        int start = rrIndexBySide[dirIndex(inputSide)];
+
+        for (int i = 0; i < points.size() && !remaining.isEmpty(); i++) {
+            int idx = (start + i) % points.size();
+            QuickLinkNetworkManager.GlobalPosRef ref = points.get(idx);
+            ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
+            if (pointLevel == null) continue;
+
+            BlockEntity other = pointLevel.getBlockEntity(ref.pos());
+            if (!(other instanceof ItemPlugBlockEntity pointBe) || !pointBe.enabled) continue;
+
+            for (Direction pointSide : Direction.values()) {
+                if (!pointBe.isPointEnabled(pointSide)) continue;
+                IItemHandler dst = getAttachedItemHandler(pointLevel, ref.pos(), pointSide);
+                if (dst == null) continue;
+
+                ItemStack before = remaining.copy();
+                remaining = insertStack(dst, remaining, simulate);
+                moved += before.getCount() - remaining.getCount();
+
+                if (before.getCount() != remaining.getCount() && !simulate) {
+                    rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % points.size();
+                    setChanged();
+                }
+
+                if (remaining.isEmpty()) break;
+            }
+        }
+
+        return moved;
+    }
+
+    private ItemStack extractFromNetwork(Direction outputSide, int amount, boolean simulate) {
+        if (amount <= 0 || !isPointEnabled(outputSide) || !(level instanceof ServerLevel sl)) return ItemStack.EMPTY;
+
+        QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
+        List<QuickLinkNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(getNetworkKey());
+        if (plugs.isEmpty()) return ItemStack.EMPTY;
+
+        int start = rrIndexBySide[dirIndex(outputSide)];
+
+        for (int i = 0; i < plugs.size(); i++) {
+            int idx = (start + i) % plugs.size();
+            QuickLinkNetworkManager.GlobalPosRef ref = plugs.get(idx);
+            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
+            if (plugLevel == null) continue;
+
+            BlockEntity other = plugLevel.getBlockEntity(ref.pos());
+            if (!(other instanceof ItemPlugBlockEntity plugBe) || !plugBe.enabled) continue;
+
+            for (Direction plugSide : Direction.values()) {
+                if (!plugBe.isPlugEnabled(plugSide)) continue;
+
+                IItemHandler src = getAttachedItemHandler(plugLevel, ref.pos(), plugSide);
+                if (src == null) continue;
+
+                ItemStack extracted = extractAny(src, amount, simulate);
+                if (extracted.isEmpty()) continue;
+
+                if (!simulate) {
+                    rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % plugs.size();
+                    setChanged();
+                }
+                return extracted;
+            }
+        }
+
+        return ItemStack.EMPTY;
+    }
+
     private void tryPullOnce(ServerLevel sl, Direction pointSide) {
-        Container dst = getAttachedContainer(sl, worldPosition, pointSide);
+        IItemHandler dst = getAttachedItemHandler(sl, worldPosition, pointSide);
         if (dst == null) return;
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
@@ -258,10 +351,9 @@ public class ItemPlugBlockEntity extends BlockEntity {
             for (Direction plugSide : Direction.values()) {
                 if (!plugBe.isPlugEnabled(plugSide)) continue;
 
-                Container src = getAttachedContainer(plugLevel, plugPos, plugSide);
+                IItemHandler src = getAttachedItemHandler(plugLevel, plugPos, plugSide);
                 if (src == null) continue;
 
-                //int moved = moveItems(src, dst, MOVE_BATCH);
                 int moved = moveItems(src, dst, moveBatch);
                 if (moved > 0) {
                     rrIndexBySide[pIdx] = (idx + 1) % plugs.size();
@@ -279,59 +371,182 @@ public class ItemPlugBlockEntity extends BlockEntity {
     // container attach (ФИКС)
     // ------------------------------------------------
 
-    private static Container getAttachedContainer(ServerLevel level, BlockPos selfPos, Direction side) {
+    private static IItemHandler getAttachedItemHandler(ServerLevel level, BlockPos selfPos, Direction side) {
         BlockPos target = selfPos.relative(side); // <<< ВАЖНО
-        return HopperBlockEntity.getContainerAt(level, target);
+        Direction targetFaceTowardUs = side.getOpposite();
+        IItemHandler handler = level.getCapability(Capabilities.ItemHandler.BLOCK, target, targetFaceTowardUs);
+        if (handler != null) return handler;
+
+        Container container = HopperBlockEntity.getContainerAt(level, target);
+        return container == null ? null : new ContainerItemHandler(container);
     }
 
     // ------------------------------------------------
     // move items
     // ------------------------------------------------
 
-    private static int moveItems(Container src, Container dst, int count) {
+    private static int moveItems(IItemHandler src, IItemHandler dst, int count) {
         if (count <= 0) return 0;
         int moved = 0;
 
-        for (int i = 0; i < src.getContainerSize() && moved < count; i++) {
-            ItemStack s = src.getItem(i);
+        for (int i = 0; i < src.getSlots() && moved < count; i++) {
+            ItemStack s = src.getStackInSlot(i);
             if (s.isEmpty()) continue;
 
             while (!s.isEmpty() && moved < count) {
-                ItemStack one = s.copy();
-                one.setCount(1);
+                ItemStack simulated = src.extractItem(i, 1, true);
+                if (simulated.isEmpty()) break;
 
-                if (!tryInsertOne(dst, one)) break;
+                ItemStack remainder = insertStack(dst, simulated, true);
+                if (!remainder.isEmpty()) break;
 
-                src.removeItem(i, 1);
+                ItemStack drained = src.extractItem(i, 1, false);
+                if (drained.isEmpty()) break;
+
+                ItemStack leftover = insertStack(dst, drained, false);
+                if (!leftover.isEmpty()) break;
                 moved++;
-                s = src.getItem(i);
+                s = src.getStackInSlot(i);
             }
-        }
-
-        if (moved > 0) {
-            src.setChanged();
-            dst.setChanged();
         }
 
         return moved;
     }
 
-    private static boolean tryInsertOne(Container dst, ItemStack one) {
-        for (int j = 0; j < dst.getContainerSize(); j++) {
-            ItemStack d = dst.getItem(j);
+    private static ItemStack insertStack(IItemHandler dst, ItemStack stack, boolean simulate) {
+        ItemStack remaining = stack;
+        for (int i = 0; i < dst.getSlots() && !remaining.isEmpty(); i++) {
+            remaining = dst.insertItem(i, remaining, simulate);
+        }
+        return remaining;
+    }
 
-            if (d.isEmpty()) {
-                dst.setItem(j, one);
-                return true;
-            }
-
-            if (ItemStack.isSameItemSameComponents(d, one) && d.getCount() < d.getMaxStackSize()) {
-                d.grow(1);
-                dst.setItem(j, d);
-                return true;
+    private static ItemStack extractAny(IItemHandler src, int amount, boolean simulate) {
+        for (int i = 0; i < src.getSlots(); i++) {
+            ItemStack extracted = src.extractItem(i, amount, simulate);
+            if (!extracted.isEmpty()) {
+                return extracted;
             }
         }
-        return false;
+        return ItemStack.EMPTY;
+    }
+
+    private static final class SideItemHandler implements IItemHandler {
+        private final ItemPlugBlockEntity owner;
+        private final Direction side;
+
+        private SideItemHandler(ItemPlugBlockEntity owner, Direction side) {
+            this.owner = owner;
+            this.side = side;
+        }
+
+        @Override
+        public int getSlots() { return 1; }
+
+        @Override
+        public ItemStack getStackInSlot(int slot) { return ItemStack.EMPTY; }
+
+        @Override
+        public ItemStack insertItem(int slot, ItemStack stack, boolean simulate) {
+            if (slot != 0 || stack.isEmpty()) return stack;
+            int moved = owner.receiveIntoNetwork(side, stack, simulate);
+            if (moved <= 0) return stack;
+
+            ItemStack remaining = stack.copy();
+            remaining.shrink(moved);
+            return remaining;
+        }
+
+        @Override
+        public ItemStack extractItem(int slot, int amount, boolean simulate) {
+            if (slot != 0 || amount <= 0) return ItemStack.EMPTY;
+            return owner.extractFromNetwork(side, amount, simulate);
+        }
+
+        @Override
+        public int getSlotLimit(int slot) { return 64; }
+
+        @Override
+        public boolean isItemValid(int slot, ItemStack stack) {
+            return slot == 0 && owner.isPlugEnabled(side);
+        }
+    }
+
+    private static final class ContainerItemHandler implements IItemHandler {
+        private final Container container;
+
+        private ContainerItemHandler(Container container) {
+            this.container = container;
+        }
+
+        @Override
+        public int getSlots() {
+            return container.getContainerSize();
+        }
+
+        @Override
+        public ItemStack getStackInSlot(int slot) {
+            return container.getItem(slot);
+        }
+
+        @Override
+        public ItemStack insertItem(int slot, ItemStack stack, boolean simulate) {
+            if (stack.isEmpty()) return ItemStack.EMPTY;
+            ItemStack current = container.getItem(slot);
+
+            if (!current.isEmpty() && !ItemStack.isSameItemSameComponents(current, stack)) {
+                return stack;
+            }
+
+            int limit = Math.min(stack.getMaxStackSize(), container.getMaxStackSize());
+            int canInsert = current.isEmpty() ? limit : (limit - current.getCount());
+            if (canInsert <= 0) return stack;
+
+            int toInsert = Math.min(canInsert, stack.getCount());
+            if (!simulate) {
+                if (current.isEmpty()) {
+                    ItemStack inserted = stack.copy();
+                    inserted.setCount(toInsert);
+                    container.setItem(slot, inserted);
+                } else {
+                    current.grow(toInsert);
+                    container.setItem(slot, current);
+                }
+                container.setChanged();
+            }
+
+            if (toInsert == stack.getCount()) return ItemStack.EMPTY;
+            ItemStack remainder = stack.copy();
+            remainder.shrink(toInsert);
+            return remainder;
+        }
+
+        @Override
+        public ItemStack extractItem(int slot, int amount, boolean simulate) {
+            if (amount <= 0) return ItemStack.EMPTY;
+            ItemStack current = container.getItem(slot);
+            if (current.isEmpty()) return ItemStack.EMPTY;
+
+            int toExtract = Math.min(amount, current.getCount());
+            ItemStack extracted = current.copy();
+            extracted.setCount(toExtract);
+
+            if (!simulate) {
+                container.removeItem(slot, toExtract);
+                container.setChanged();
+            }
+            return extracted;
+        }
+
+        @Override
+        public int getSlotLimit(int slot) {
+            return container.getMaxStackSize();
+        }
+
+        @Override
+        public boolean isItemValid(int slot, ItemStack stack) {
+            return container.canPlaceItem(slot, stack);
+        }
     }
 
     // ------------------------------------------------
