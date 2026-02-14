@@ -37,7 +37,7 @@ public final class QuickLinkNeoForge {
 
     public static final DeferredHolder<Block, Block> ITEM_PLUG =
             BLOCKS.register("item_plug",
-                    () -> new ItemPlugBlock(Block.Properties.of().strength(1.5f)));
+                    () -> new ItemPlugBlock(Block.Properties.of().strength(1.5f).noOcclusion()));
 
 
     public static final DeferredHolder<Item, Item> ITEM_PLUG_ITEM =

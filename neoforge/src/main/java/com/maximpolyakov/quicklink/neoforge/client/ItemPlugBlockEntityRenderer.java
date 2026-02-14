@@ -21,6 +21,8 @@ import org.joml.Matrix4f;
 public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlugBlockEntity> {
 
     private static final float EPS = 0.001f;
+    private static final float FACE_MIN = 2f / 16f;
+    private static final float FACE_MAX = 14f / 16f;
 
     private static final ResourceLocation WHITE_TEX =
             ResourceLocation.fromNamespaceAndPath("minecraft", "block/white_wool");
@@ -290,33 +292,38 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
         float vv0 = Math.min(v0, v1);
         float vv1 = Math.max(v0, v1);
 
+        float su0 = toFaceCoord(uu0);
+        float su1 = toFaceCoord(uu1);
+        float sv0 = toFaceCoord(vv0);
+        float sv1 = toFaceCoord(vv1);
+
         float nx = face.getStepX();
         float ny = face.getStepY();
         float nz = face.getStepZ();
 
         switch (face) {
             case SOUTH -> quad(vc, pose, mat, nx, ny, nz,
-                    uu0, vv0, 1f + eps,  uu1, vv0, 1f + eps,  uu1, vv1, 1f + eps,  uu0, vv1, 1f + eps,
+                    su0, sv0, FACE_MAX + eps,  su1, sv0, FACE_MAX + eps,  su1, sv1, FACE_MAX + eps,  su0, sv1, FACE_MAX + eps,
                     U0, V0, U1, V1, r, g, b, a, light, overlay);
 
             case NORTH -> quad(vc, pose, mat, nx, ny, nz,
-                    1f - uu0, vv0, -eps,  1f - uu1, vv0, -eps,  1f - uu1, vv1, -eps,  1f - uu0, vv1, -eps,
+                    1f - su0, sv0, FACE_MIN - eps,  1f - su1, sv0, FACE_MIN - eps,  1f - su1, sv1, FACE_MIN - eps,  1f - su0, sv1, FACE_MIN - eps,
                     U0, V0, U1, V1, r, g, b, a, light, overlay);
 
             case EAST -> quad(vc, pose, mat, nx, ny, nz,
-                    1f + eps, vv0, 1f - uu0,  1f + eps, vv0, 1f - uu1,  1f + eps, vv1, 1f - uu1,  1f + eps, vv1, 1f - uu0,
+                    FACE_MAX + eps, sv0, 1f - su0,  FACE_MAX + eps, sv0, 1f - su1,  FACE_MAX + eps, sv1, 1f - su1,  FACE_MAX + eps, sv1, 1f - su0,
                     U0, V0, U1, V1, r, g, b, a, light, overlay);
 
             case WEST -> quad(vc, pose, mat, nx, ny, nz,
-                    -eps, vv0, uu0,  -eps, vv0, uu1,  -eps, vv1, uu1,  -eps, vv1, uu0,
+                    FACE_MIN - eps, sv0, su0,  FACE_MIN - eps, sv0, su1,  FACE_MIN - eps, sv1, su1,  FACE_MIN - eps, sv1, su0,
                     U0, V0, U1, V1, r, g, b, a, light, overlay);
 
             case UP -> quad(vc, pose, mat, nx, ny, nz,
-                    uu0, 1f + eps, 1f - vv0,  uu1, 1f + eps, 1f - vv0,  uu1, 1f + eps, 1f - vv1,  uu0, 1f + eps, 1f - vv1,
+                    su0, FACE_MAX + eps, 1f - sv0,  su1, FACE_MAX + eps, 1f - sv0,  su1, FACE_MAX + eps, 1f - sv1,  su0, FACE_MAX + eps, 1f - sv1,
                     U0, V0, U1, V1, r, g, b, a, light, overlay);
 
             case DOWN -> quad(vc, pose, mat, nx, ny, nz,
-                    uu0, -eps, vv0,  uu1, -eps, vv0,  uu1, -eps, vv1,  uu0, -eps, vv1,
+                    su0, FACE_MIN - eps, sv0,  su1, FACE_MIN - eps, sv0,  su1, FACE_MIN - eps, sv1,  su0, FACE_MIN - eps, sv1,
                     U0, V0, U1, V1, r, g, b, a, light, overlay);
         }
     }
@@ -376,6 +383,10 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
 
     private static float lerp(float a, float b, float t) {
         return a + (b - a) * t;
+    }
+
+    private static float toFaceCoord(float t) {
+        return FACE_MIN + (FACE_MAX - FACE_MIN) * clamp01(t);
     }
 
     private static float clamp01(float x) {
