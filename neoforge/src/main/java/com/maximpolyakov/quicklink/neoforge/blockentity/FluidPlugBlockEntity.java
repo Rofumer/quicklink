@@ -50,21 +50,21 @@ public class FluidPlugBlockEntity extends BlockEntity {
     private final long[] waterAccumBySide = new long[6];
 
     // network key
-    private QuickLinkColors colors = QuickLinkColors.unset();
+    private final QuickLinkColors[] sideColors = new QuickLinkColors[6];
 
     // master enable
     private boolean enabled = true;
 
     // cached registration state
-    private int lastRegKey = Integer.MIN_VALUE;
-    private boolean lastRegHadPlug = false;
-    private boolean lastRegHadPoint = false;
+    private java.util.Set<Integer> lastRegPlugKeys = new java.util.HashSet<>();
+    private java.util.Set<Integer> lastRegPointKeys = new java.util.HashSet<>();
     private final IFluidHandler[] sideCapabilities = new IFluidHandler[6];
 
     public FluidPlugBlockEntity(BlockPos pos, BlockState state) {
         super(QuickLinkNeoForge.FLUID_PLUG_BE.get(), pos, state);
         for (Direction side : Direction.values()) {
             sideCapabilities[dirIndex(side)] = new SideFluidHandler(this, side);
+            sideColors[dirIndex(side)] = QuickLinkColors.unset();
         }
     }
 
@@ -90,16 +90,32 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
     // ---------------- public API (block/use) ----------------
 
-    public QuickLinkColors getColors() { return colors; }
+    public QuickLinkColors getColors(Direction side) { return sideColors[dirIndex(side)]; }
 
     public void setColors(QuickLinkColors colors) {
-        this.colors = (colors == null) ? QuickLinkColors.unset() : colors;
+        QuickLinkColors safe = (colors == null) ? QuickLinkColors.unset() : colors;
+        for (int i = 0; i < 6; i++) sideColors[i] = safe;
         setChangedAndSync();
         syncRegistration();
     }
 
-    public int getNetworkKey() {
-        return colors.networkKey();
+    public int[] getSideColorsPacked() {
+        int[] out = new int[6];
+        for (int i = 0; i < 6; i++) out[i] = sideColors[i].pack();
+        return out;
+    }
+
+    public void setSideColorsPacked(int[] packed) {
+        for (int i = 0; i < 6; i++) {
+            int v = (packed != null && packed.length > i) ? packed[i] : QuickLinkColors.unset().pack();
+            sideColors[i] = QuickLinkColors.unpack(v);
+        }
+        setChangedAndSync();
+        syncRegistration();
+    }
+
+    public int getNetworkKey(Direction side) {
+        return sideColors[dirIndex(side)].networkKey();
     }
 
     public boolean isEnabled() { return enabled; }
@@ -109,12 +125,13 @@ public class FluidPlugBlockEntity extends BlockEntity {
         setChangedAndSync();
     }
 
-    public void setColor(int slot, byte colorId) {
-        int oldKey = getNetworkKey();
-        colors = colors.with(slot, colorId);
+    public void setColor(Direction side, int slot, byte colorId) {
+        int idx = dirIndex(side);
+        int oldKey = sideColors[idx].networkKey();
+        sideColors[idx] = sideColors[idx].with(slot, colorId);
         setChangedAndSync();
 
-        if (oldKey != getNetworkKey()) {
+        if (oldKey != sideColors[idx].networkKey()) {
             syncRegistration();
         }
     }
@@ -258,40 +275,33 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
     private void unregisterFromManager() {
         if (!(level instanceof ServerLevel sl)) return;
-        if (lastRegKey == Integer.MIN_VALUE) return;
-
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
-        if (lastRegHadPlug) mgr.unregisterPlug(sl, lastRegKey, worldPosition);
-        if (lastRegHadPoint) mgr.unregisterPoint(sl, lastRegKey, worldPosition);
 
-        lastRegKey = Integer.MIN_VALUE;
-        lastRegHadPlug = false;
-        lastRegHadPoint = false;
+        for (int key : lastRegPlugKeys) mgr.unregisterPlug(sl, key, worldPosition);
+        for (int key : lastRegPointKeys) mgr.unregisterPoint(sl, key, worldPosition);
+
+        lastRegPlugKeys.clear();
+        lastRegPointKeys.clear();
     }
 
     private void syncRegistration() {
         if (!(level instanceof ServerLevel sl)) return;
 
-        int key = getNetworkKey();
-        boolean nowPlug = hasAnyEffectivePlug();
-        boolean nowPoint = hasAnyEffectivePoint();
+        unregisterFromManager();
 
-        boolean hadSomething = (lastRegKey != Integer.MIN_VALUE) && (lastRegHadPlug || lastRegHadPoint);
-        boolean keyChanged = hadSomething && (lastRegKey != key);
-        boolean plugChanged = hadSomething && (lastRegHadPlug != nowPlug);
-        boolean pointChanged = hadSomething && (lastRegHadPoint != nowPoint);
-
-        if (hadSomething && (keyChanged || plugChanged || pointChanged)) {
-            unregisterFromManager();
+        java.util.Set<Integer> plugKeys = new java.util.HashSet<>();
+        java.util.Set<Integer> pointKeys = new java.util.HashSet<>();
+        for (Direction side : Direction.values()) {
+            if (isPlugEnabled(side)) plugKeys.add(getNetworkKey(side));
+            if (isPointEnabled(side)) pointKeys.add(getNetworkKey(side));
         }
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
-        if (nowPlug) mgr.registerPlug(sl, key, worldPosition);
-        if (nowPoint) mgr.registerPoint(sl, key, worldPosition);
+        for (int key : plugKeys) mgr.registerPlug(sl, key, worldPosition);
+        for (int key : pointKeys) mgr.registerPoint(sl, key, worldPosition);
 
-        lastRegKey = key;
-        lastRegHadPlug = nowPlug;
-        lastRegHadPoint = nowPoint;
+        lastRegPlugKeys = plugKeys;
+        lastRegPointKeys = pointKeys;
     }
 
     // client sync
@@ -339,7 +349,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
         if (resource.isEmpty() || !isPlugEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
-        List<QuickLinkFluidNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(getNetworkKey());
+        int networkKey = getNetworkKey(inputSide);
+        List<QuickLinkFluidNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
         if (points.isEmpty()) return 0;
 
         int moved = 0;
@@ -356,7 +367,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
             if (!(other instanceof FluidPlugBlockEntity pointBe) || !pointBe.enabled) continue;
 
             for (Direction pointSide : Direction.values()) {
-                if (!pointBe.isPointEnabled(pointSide)) continue;
+                if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
                 IFluidHandler dst = getAttachedFluidHandler(pointLevel, ref.pos(), pointSide);
                 if (dst == null) continue;
 
@@ -384,7 +395,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
         if (amount <= 0 || !isPointEnabled(outputSide) || !(level instanceof ServerLevel sl)) return FluidStack.EMPTY;
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
-        List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(getNetworkKey());
+        int networkKey = getNetworkKey(outputSide);
+        List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
         if (plugs.isEmpty()) return FluidStack.EMPTY;
 
         int start = rrIndexBySide[dirIndex(outputSide)];
@@ -399,7 +411,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
             if (!(other instanceof FluidPlugBlockEntity plugBe) || !plugBe.enabled) continue;
 
             for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide)) continue;
+                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
 
                 if (plugBe.isInfiniteWater(plugSide)) {
                     if (match != null && !match.isEmpty() && !match.is(Fluids.WATER)) continue;
@@ -436,7 +448,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
      * into destination handler attached to this pointSide.
      */
     private void tryTransferOnce(ServerLevel sl, Direction pointSide, int amountMB) {
-        int key = getNetworkKey();
+        int networkKey = getNetworkKey(pointSide);
+        int key = networkKey;
 
         IFluidHandler dst = getAttachedFluidHandler(sl, worldPosition, pointSide);
         if (DBG_TRANSFER) {
@@ -477,7 +490,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
             // iterate all enabled PLUG sides of that BE
             for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide)) continue;
+                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
 
                 if (plugBe.isInfiniteWater(plugSide)) {
                     if (pushInfiniteWater(dst, plugBe, plugSide)) {
@@ -626,7 +639,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
         if (!isPointEnabled(outputSide) || !(level instanceof ServerLevel sl)) return FluidStack.EMPTY;
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
-        List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(getNetworkKey());
+        int networkKey = getNetworkKey(outputSide);
+        List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
         if (plugs.isEmpty()) return FluidStack.EMPTY;
 
         for (QuickLinkFluidNetworkManager.GlobalPosRef ref : plugs) {
@@ -637,7 +651,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
             if (!(other instanceof FluidPlugBlockEntity plugBe) || !plugBe.enabled) continue;
 
             for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide)) continue;
+                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
 
                 if (plugBe.isInfiniteWater(plugSide)) {
                     return new FluidStack(Fluids.WATER, 1);
@@ -660,7 +674,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.saveAdditional(tag, registries);
 
-        tag.putInt(QuickLinkNbt.COLORS, colors.pack());
+        tag.putIntArray(QuickLinkNbt.SIDE_COLORS, getSideColorsPacked());
+        tag.putInt(QuickLinkNbt.COLORS, sideColors[0].pack());
         tag.putBoolean(QuickLinkNbt.ENABLED, enabled);
 
         tag.putInt("ql_plug_mask", clampMask6(plugMask));
@@ -676,11 +691,19 @@ public class FluidPlugBlockEntity extends BlockEntity {
     public void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.loadAdditional(tag, registries);
 
-        int defaultPackedColors = QuickLinkColors.unset().pack();
-        int packed = tag.contains(QuickLinkNbt.COLORS, Tag.TAG_INT)
-                ? tag.getInt(QuickLinkNbt.COLORS)
-                : defaultPackedColors;
-        colors = QuickLinkColors.unpack(packed);
+        if (tag.contains(QuickLinkNbt.SIDE_COLORS, Tag.TAG_INT_ARRAY)) {
+            int[] packed = tag.getIntArray(QuickLinkNbt.SIDE_COLORS);
+            for (int i = 0; i < 6; i++) {
+                int v = (packed.length > i) ? packed[i] : QuickLinkColors.unset().pack();
+                sideColors[i] = QuickLinkColors.unpack(v);
+            }
+        } else {
+            int packed = tag.contains(QuickLinkNbt.COLORS, Tag.TAG_INT)
+                    ? tag.getInt(QuickLinkNbt.COLORS)
+                    : QuickLinkColors.unset().pack();
+            QuickLinkColors legacy = QuickLinkColors.unpack(packed);
+            for (int i = 0; i < 6; i++) sideColors[i] = legacy;
+        }
 
         enabled = !tag.contains(QuickLinkNbt.ENABLED, Tag.TAG_BYTE) || tag.getBoolean(QuickLinkNbt.ENABLED);
 

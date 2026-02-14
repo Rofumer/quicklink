@@ -121,7 +121,7 @@ public class EnergyPlugBlock extends BaseEntityBlock {
 
         int slot = quadSlotFromHit(face, lx, ly, lz);
         byte colorId = (byte) dye.getDyeColor().getId();
-        be.setColor(slot, colorId);
+        be.setColor(face, slot, colorId);
 
         return ItemInteractionResult.CONSUME;
     }
@@ -138,7 +138,9 @@ public class EnergyPlugBlock extends BaseEntityBlock {
         if (customData == null) return;
 
         CompoundTag tag = customData.copyTag();
-        if (tag.contains(QuickLinkNbt.COLORS)) {
+        if (tag.contains(QuickLinkNbt.SIDE_COLORS)) {
+            be.setSideColorsPacked(tag.getIntArray(QuickLinkNbt.SIDE_COLORS));
+        } else if (tag.contains(QuickLinkNbt.COLORS)) {
             be.setColors(QuickLinkColors.unpack(tag.getInt(QuickLinkNbt.COLORS)));
         }
     }
@@ -150,7 +152,8 @@ public class EnergyPlugBlock extends BaseEntityBlock {
         if (be0 instanceof EnergyPlugBlockEntity be) {
             CustomData existing = drop.get(DataComponents.CUSTOM_DATA);
             CompoundTag tag = (existing == null) ? new CompoundTag() : existing.copyTag();
-            tag.putInt(QuickLinkNbt.COLORS, be.getColors().pack());
+            tag.putIntArray(QuickLinkNbt.SIDE_COLORS, be.getSideColorsPacked());
+            tag.putInt(QuickLinkNbt.COLORS, be.getColors(Direction.NORTH).pack());
             drop.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
         }
         return List.of(drop);

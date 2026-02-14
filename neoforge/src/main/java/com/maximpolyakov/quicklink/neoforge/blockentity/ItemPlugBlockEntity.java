@@ -38,18 +38,18 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
     private final int[] rrIndexBySide = new int[6];
 
-    private QuickLinkColors colors = QuickLinkColors.unset();
+    private final QuickLinkColors[] sideColors = new QuickLinkColors[6];
     private boolean enabled = true;
 
-    private int lastRegKey = Integer.MIN_VALUE;
-    private boolean lastRegHadPlug = false;
-    private boolean lastRegHadPoint = false;
+    private java.util.Set<Integer> lastRegPlugKeys = new java.util.HashSet<>();
+    private java.util.Set<Integer> lastRegPointKeys = new java.util.HashSet<>();
     private final IItemHandler[] sideCapabilities = new IItemHandler[6];
 
     public ItemPlugBlockEntity(BlockPos pos, BlockState state) {
         super(QuickLinkNeoForge.ITEM_PLUG_BE.get(), pos, state);
         for (Direction side : Direction.values()) {
             sideCapabilities[dirIndex(side)] = new SideItemHandler(this, side);
+            sideColors[dirIndex(side)] = QuickLinkColors.unset();
         }
     }
 
@@ -73,24 +73,41 @@ public class ItemPlugBlockEntity extends BlockEntity {
     // colors / network
     // ------------------------------------------------
 
-    public QuickLinkColors getColors() { return colors; }
+    public QuickLinkColors getColors(Direction side) { return sideColors[dirIndex(side)]; }
 
     public void setColors(QuickLinkColors colors) {
-        this.colors = (colors == null) ? QuickLinkColors.unset() : colors;
+        QuickLinkColors safe = (colors == null) ? QuickLinkColors.unset() : colors;
+        for (int i = 0; i < 6; i++) sideColors[i] = safe;
         setChangedAndSync();
         syncRegistration();
     }
 
-    public int getNetworkKey() {
-        return colors.networkKey();
+    public int[] getSideColorsPacked() {
+        int[] out = new int[6];
+        for (int i = 0; i < 6; i++) out[i] = sideColors[i].pack();
+        return out;
     }
 
-    public void setColor(int slot, byte colorId) {
-        int oldKey = getNetworkKey();
-        colors = colors.with(slot, colorId);
+    public void setSideColorsPacked(int[] packed) {
+        for (int i = 0; i < 6; i++) {
+            int v = (packed != null && packed.length > i) ? packed[i] : QuickLinkColors.unset().pack();
+            sideColors[i] = QuickLinkColors.unpack(v);
+        }
+        setChangedAndSync();
+        syncRegistration();
+    }
+
+    public int getNetworkKey(Direction side) {
+        return sideColors[dirIndex(side)].networkKey();
+    }
+
+    public void setColor(Direction side, int slot, byte colorId) {
+        int idx = dirIndex(side);
+        int oldKey = sideColors[idx].networkKey();
+        sideColors[idx] = sideColors[idx].with(slot, colorId);
         setChangedAndSync();
 
-        if (oldKey != getNetworkKey()) {
+        if (oldKey != sideColors[idx].networkKey()) {
             syncRegistration();
         }
     }
@@ -201,33 +218,33 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
     private void unregisterFromManager() {
         if (!(level instanceof ServerLevel sl)) return;
-        if (lastRegKey == Integer.MIN_VALUE) return;
-
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
-        if (lastRegHadPlug) mgr.unregisterPlug(sl, lastRegKey, worldPosition);
-        if (lastRegHadPoint) mgr.unregisterPoint(sl, lastRegKey, worldPosition);
 
-        lastRegKey = Integer.MIN_VALUE;
-        lastRegHadPlug = false;
-        lastRegHadPoint = false;
+        for (int key : lastRegPlugKeys) mgr.unregisterPlug(sl, key, worldPosition);
+        for (int key : lastRegPointKeys) mgr.unregisterPoint(sl, key, worldPosition);
+
+        lastRegPlugKeys.clear();
+        lastRegPointKeys.clear();
     }
 
     private void syncRegistration() {
         if (!(level instanceof ServerLevel sl)) return;
 
-        int key = getNetworkKey();
-        boolean nowPlug = hasAnyEffectivePlug();
-        boolean nowPoint = hasAnyEffectivePoint();
+        unregisterFromManager();
 
-        if (lastRegKey != Integer.MIN_VALUE) unregisterFromManager();
+        java.util.Set<Integer> plugKeys = new java.util.HashSet<>();
+        java.util.Set<Integer> pointKeys = new java.util.HashSet<>();
+        for (Direction side : Direction.values()) {
+            if (isPlugEnabled(side)) plugKeys.add(getNetworkKey(side));
+            if (isPointEnabled(side)) pointKeys.add(getNetworkKey(side));
+        }
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
-        if (nowPlug) mgr.registerPlug(sl, key, worldPosition);
-        if (nowPoint) mgr.registerPoint(sl, key, worldPosition);
+        for (int key : plugKeys) mgr.registerPlug(sl, key, worldPosition);
+        for (int key : pointKeys) mgr.registerPoint(sl, key, worldPosition);
 
-        lastRegKey = key;
-        lastRegHadPlug = nowPlug;
-        lastRegHadPoint = nowPoint;
+        lastRegPlugKeys = plugKeys;
+        lastRegPointKeys = pointKeys;
     }
 
     // ------------------------------------------------
@@ -261,7 +278,8 @@ public class ItemPlugBlockEntity extends BlockEntity {
         if (stack.isEmpty() || !isPlugEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
-        List<QuickLinkNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(getNetworkKey());
+        int networkKey = getNetworkKey(inputSide);
+        List<QuickLinkNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
         if (points.isEmpty()) return 0;
 
         ItemStack remaining = stack.copy();
@@ -278,7 +296,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
             if (!(other instanceof ItemPlugBlockEntity pointBe) || !pointBe.enabled) continue;
 
             for (Direction pointSide : Direction.values()) {
-                if (!pointBe.isPointEnabled(pointSide)) continue;
+                if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
                 IItemHandler dst = getAttachedItemHandler(pointLevel, ref.pos(), pointSide);
                 if (dst == null) continue;
 
@@ -302,7 +320,8 @@ public class ItemPlugBlockEntity extends BlockEntity {
         if (amount <= 0 || !isPointEnabled(outputSide) || !(level instanceof ServerLevel sl)) return ItemStack.EMPTY;
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
-        List<QuickLinkNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(getNetworkKey());
+        int networkKey = getNetworkKey(outputSide);
+        List<QuickLinkNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
         if (plugs.isEmpty()) return ItemStack.EMPTY;
 
         int start = rrIndexBySide[dirIndex(outputSide)];
@@ -317,7 +336,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
             if (!(other instanceof ItemPlugBlockEntity plugBe) || !plugBe.enabled) continue;
 
             for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide)) continue;
+                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
 
                 IItemHandler src = getAttachedItemHandler(plugLevel, ref.pos(), plugSide);
                 if (src == null) continue;
@@ -341,7 +360,8 @@ public class ItemPlugBlockEntity extends BlockEntity {
         if (dst == null) return;
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
-        List<QuickLinkNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(getNetworkKey());
+        int networkKey = getNetworkKey(pointSide);
+        List<QuickLinkNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
         if (plugs.isEmpty()) return;
 
         int pIdx = dirIndex(pointSide);
@@ -359,7 +379,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
             if (!plugBe.enabled) continue;
 
             for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide)) continue;
+                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
 
                 IItemHandler src = getAttachedItemHandler(plugLevel, plugPos, plugSide);
                 if (src == null) continue;
@@ -567,7 +587,8 @@ public class ItemPlugBlockEntity extends BlockEntity {
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.saveAdditional(tag, registries);
 
-        tag.putInt(QuickLinkNbt.COLORS, colors.pack());
+        tag.putIntArray(QuickLinkNbt.SIDE_COLORS, getSideColorsPacked());
+        tag.putInt(QuickLinkNbt.COLORS, sideColors[0].pack());
         tag.putBoolean(QuickLinkNbt.ENABLED, enabled);
         tag.putInt("ql_plug_mask", clampMask6(plugMask));
         tag.putInt("ql_point_mask", clampMask6(pointMask));
@@ -579,11 +600,19 @@ public class ItemPlugBlockEntity extends BlockEntity {
     public void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.loadAdditional(tag, registries);
 
-        int packed = tag.contains(QuickLinkNbt.COLORS, Tag.TAG_INT)
-                ? tag.getInt(QuickLinkNbt.COLORS)
-                : QuickLinkColors.unset().pack();
-
-        colors = QuickLinkColors.unpack(packed);
+        if (tag.contains(QuickLinkNbt.SIDE_COLORS, Tag.TAG_INT_ARRAY)) {
+            int[] packed = tag.getIntArray(QuickLinkNbt.SIDE_COLORS);
+            for (int i = 0; i < 6; i++) {
+                int v = (packed.length > i) ? packed[i] : QuickLinkColors.unset().pack();
+                sideColors[i] = QuickLinkColors.unpack(v);
+            }
+        } else {
+            int packed = tag.contains(QuickLinkNbt.COLORS, Tag.TAG_INT)
+                    ? tag.getInt(QuickLinkNbt.COLORS)
+                    : QuickLinkColors.unset().pack();
+            QuickLinkColors legacy = QuickLinkColors.unpack(packed);
+            for (int i = 0; i < 6; i++) sideColors[i] = legacy;
+        }
         enabled = !tag.contains(QuickLinkNbt.ENABLED, Tag.TAG_BYTE) || tag.getBoolean(QuickLinkNbt.ENABLED);
 
         plugMask = clampMask6(tag.getInt("ql_plug_mask"));

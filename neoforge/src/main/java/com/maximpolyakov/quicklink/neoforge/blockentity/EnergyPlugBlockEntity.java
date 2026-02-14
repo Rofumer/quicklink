@@ -31,12 +31,11 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     private int disabledMask = 0;
     private final int[] rrIndexBySide = new int[6];
 
-    private QuickLinkColors colors = QuickLinkColors.unset();
+    private final QuickLinkColors[] sideColors = new QuickLinkColors[6];
     private boolean enabled = true;
 
-    private int lastRegKey = Integer.MIN_VALUE;
-    private boolean lastRegHadPlug = false;
-    private boolean lastRegHadPoint = false;
+    private java.util.Set<Integer> lastRegPlugKeys = new java.util.HashSet<>();
+    private java.util.Set<Integer> lastRegPointKeys = new java.util.HashSet<>();
     private final IEnergyStorage[] sideCapabilities = new IEnergyStorage[6];
 
     public EnergyPlugBlockEntity(BlockPos pos, BlockState state) {
@@ -44,6 +43,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         for (Direction side : Direction.values()) {
             int idx = dirIndex(side);
             sideCapabilities[idx] = new SideEnergyStorage(this, side);
+            sideColors[idx] = QuickLinkColors.unset();
         }
     }
 
@@ -51,22 +51,39 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     private static int clampMask6(int m) { return m & 0b111111; }
     private static int dirIndex(Direction d) { return Math.max(0, Math.min(5, d.get3DDataValue())); }
 
-    public QuickLinkColors getColors() { return colors; }
+    public QuickLinkColors getColors(Direction side) { return sideColors[dirIndex(side)]; }
 
     public void setColors(QuickLinkColors colors) {
-        this.colors = (colors == null) ? QuickLinkColors.unset() : colors;
+        QuickLinkColors safe = (colors == null) ? QuickLinkColors.unset() : colors;
+        for (int i = 0; i < 6; i++) sideColors[i] = safe;
         setChangedAndSync();
         syncRegistration();
     }
 
-    public void setColor(int slot, byte colorId) {
-        int oldKey = getNetworkKey();
-        colors = colors.with(slot, colorId);
-        setChangedAndSync();
-        if (oldKey != getNetworkKey()) syncRegistration();
+    public int[] getSideColorsPacked() {
+        int[] out = new int[6];
+        for (int i = 0; i < 6; i++) out[i] = sideColors[i].pack();
+        return out;
     }
 
-    public int getNetworkKey() { return colors.networkKey(); }
+    public void setSideColorsPacked(int[] packed) {
+        for (int i = 0; i < 6; i++) {
+            int v = (packed != null && packed.length > i) ? packed[i] : QuickLinkColors.unset().pack();
+            sideColors[i] = QuickLinkColors.unpack(v);
+        }
+        setChangedAndSync();
+        syncRegistration();
+    }
+
+    public void setColor(Direction side, int slot, byte colorId) {
+        int idx = dirIndex(side);
+        int oldKey = sideColors[idx].networkKey();
+        sideColors[idx] = sideColors[idx].with(slot, colorId);
+        setChangedAndSync();
+        if (oldKey != sideColors[idx].networkKey()) syncRegistration();
+    }
+
+    public int getNetworkKey(Direction side) { return sideColors[dirIndex(side)].networkKey(); }
 
     public enum SideRole { NONE, PLUG, POINT, BOTH }
 
@@ -154,33 +171,33 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
     private void unregisterFromManager() {
         if (!(level instanceof ServerLevel sl)) return;
-        if (lastRegKey == Integer.MIN_VALUE) return;
-
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
-        if (lastRegHadPlug) mgr.unregisterPlug(sl, lastRegKey, worldPosition);
-        if (lastRegHadPoint) mgr.unregisterPoint(sl, lastRegKey, worldPosition);
 
-        lastRegKey = Integer.MIN_VALUE;
-        lastRegHadPlug = false;
-        lastRegHadPoint = false;
+        for (int key : lastRegPlugKeys) mgr.unregisterPlug(sl, key, worldPosition);
+        for (int key : lastRegPointKeys) mgr.unregisterPoint(sl, key, worldPosition);
+
+        lastRegPlugKeys.clear();
+        lastRegPointKeys.clear();
     }
 
     private void syncRegistration() {
         if (!(level instanceof ServerLevel sl)) return;
 
-        int key = getNetworkKey();
-        boolean nowPlug = hasAnyEffectivePlug();
-        boolean nowPoint = hasAnyEffectivePoint();
+        unregisterFromManager();
 
-        if (lastRegKey != Integer.MIN_VALUE) unregisterFromManager();
+        java.util.Set<Integer> plugKeys = new java.util.HashSet<>();
+        java.util.Set<Integer> pointKeys = new java.util.HashSet<>();
+        for (Direction side : Direction.values()) {
+            if (isPlugEnabled(side)) plugKeys.add(getNetworkKey(side));
+            if (isPointEnabled(side)) pointKeys.add(getNetworkKey(side));
+        }
 
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
-        if (nowPlug) mgr.registerPlug(sl, key, worldPosition);
-        if (nowPoint) mgr.registerPoint(sl, key, worldPosition);
+        for (int key : plugKeys) mgr.registerPlug(sl, key, worldPosition);
+        for (int key : pointKeys) mgr.registerPoint(sl, key, worldPosition);
 
-        lastRegKey = key;
-        lastRegHadPlug = nowPlug;
-        lastRegHadPoint = nowPoint;
+        lastRegPlugKeys = plugKeys;
+        lastRegPointKeys = pointKeys;
     }
 
     public static void serverTick(Level level, BlockPos pos, BlockState state, EnergyPlugBlockEntity be) {
@@ -209,7 +226,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         if (amount <= 0 || !isPlugEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
 
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
-        List<QuickLinkEnergyNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(getNetworkKey());
+        int networkKey = getNetworkKey(inputSide);
+        List<QuickLinkEnergyNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
         if (points.isEmpty()) return 0;
 
         int moved = 0;
@@ -226,7 +244,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
             if (!(other instanceof EnergyPlugBlockEntity pointBe) || !pointBe.enabled) continue;
 
             for (Direction pointSide : Direction.values()) {
-                if (!pointBe.isPointEnabled(pointSide)) continue;
+                if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
                 IEnergyStorage dst = getAttachedEnergyStorage(pointLevel, ref.pos(), pointSide);
                 if (dst == null || !dst.canReceive()) continue;
 
@@ -252,7 +270,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         if (amount <= 0 || !isPointEnabled(outputSide) || !(level instanceof ServerLevel sl)) return 0;
 
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
-        List<QuickLinkEnergyNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(getNetworkKey());
+        int networkKey = getNetworkKey(outputSide);
+        List<QuickLinkEnergyNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
         if (plugs.isEmpty()) return 0;
 
         int moved = 0;
@@ -269,7 +288,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
             if (!(other instanceof EnergyPlugBlockEntity plugBe) || !plugBe.enabled) continue;
 
             for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide)) continue;
+                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
 
                 IEnergyStorage src = getAttachedEnergyStorage(plugLevel, ref.pos(), plugSide);
                 if (src == null || !src.canExtract()) continue;
@@ -297,7 +316,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         if (dst == null) return;
 
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
-        List<QuickLinkEnergyNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(getNetworkKey());
+        int networkKey = getNetworkKey(pointSide);
+        List<QuickLinkEnergyNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
         if (plugs.isEmpty()) return;
 
         int pIdx = dirIndex(pointSide);
@@ -315,7 +335,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
             if (!plugBe.enabled) continue;
 
             for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide)) continue;
+                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
 
                 IEnergyStorage src = getAttachedEnergyStorage(plugLevel, plugPos, plugSide);
                 if (src == null) continue;
@@ -401,7 +421,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     @Override
     protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.saveAdditional(tag, registries);
-        tag.putInt(QuickLinkNbt.COLORS, colors.pack());
+        tag.putIntArray(QuickLinkNbt.SIDE_COLORS, getSideColorsPacked());
+        tag.putInt(QuickLinkNbt.COLORS, sideColors[0].pack());
         tag.putBoolean(QuickLinkNbt.ENABLED, enabled);
         tag.putInt("ql_plug_mask", clampMask6(plugMask));
         tag.putInt("ql_point_mask", clampMask6(pointMask));
@@ -413,11 +434,19 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     public void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
         super.loadAdditional(tag, registries);
 
-        int packed = tag.contains(QuickLinkNbt.COLORS, Tag.TAG_INT)
-                ? tag.getInt(QuickLinkNbt.COLORS)
-                : QuickLinkColors.unset().pack();
-
-        colors = QuickLinkColors.unpack(packed);
+        if (tag.contains(QuickLinkNbt.SIDE_COLORS, Tag.TAG_INT_ARRAY)) {
+            int[] packed = tag.getIntArray(QuickLinkNbt.SIDE_COLORS);
+            for (int i = 0; i < 6; i++) {
+                int v = (packed.length > i) ? packed[i] : QuickLinkColors.unset().pack();
+                sideColors[i] = QuickLinkColors.unpack(v);
+            }
+        } else {
+            int packed = tag.contains(QuickLinkNbt.COLORS, Tag.TAG_INT)
+                    ? tag.getInt(QuickLinkNbt.COLORS)
+                    : QuickLinkColors.unset().pack();
+            QuickLinkColors legacy = QuickLinkColors.unpack(packed);
+            for (int i = 0; i < 6; i++) sideColors[i] = legacy;
+        }
         enabled = !tag.contains(QuickLinkNbt.ENABLED, Tag.TAG_BYTE) || tag.getBoolean(QuickLinkNbt.ENABLED);
 
         plugMask = clampMask6(tag.getInt("ql_plug_mask"));

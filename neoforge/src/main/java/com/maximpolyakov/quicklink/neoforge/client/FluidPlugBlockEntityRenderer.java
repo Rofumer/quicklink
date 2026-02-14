@@ -83,12 +83,10 @@ public class FluidPlugBlockEntityRenderer implements BlockEntityRenderer<FluidPl
                 ? LightTexture.FULL_BRIGHT
                 : boostLight(packedLight, LIGHT_BOOST_BLOCK, LIGHT_BOOST_SKY);
 
-        // 4 network colors
-        byte[] c = be.getColors().toArray();
-
         // 1) Color quadrants (only where != UNSET)
-        if (!be.getColors().isAllUnset()) {
-            for (Direction face : Direction.values()) {
+        for (Direction face : Direction.values()) {
+            byte[] c = be.getColors(face).toArray();
+            if (!be.getColors(face).isAllUnset()) {
                 draw4QuadrantsSelective(vc, pose, mat, face, EPS, U0, U1, V0, V1, c, light, overlay);
             }
         }
