@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "quicklink:block/fluid_plug" }
+  }
+}
