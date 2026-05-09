@@ -20,6 +20,8 @@ import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BaseEntityBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityTicker;
@@ -173,6 +175,11 @@ public class FluidPlugBlock extends BaseEntityBlock {
             drop.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
         }
         return List.of(drop);
+    }
+
+    @Override
+    public void spawnDestroyParticles(Level level, Player player, BlockPos pos, BlockState state) {
+        level.levelEvent(player, 2001, pos, Block.getId(Blocks.BLUE_CONCRETE.defaultBlockState()));
     }
 
     private static int quadSlotFromHit(Direction face, double lx, double ly, double lz) {
