@@ -36,7 +36,7 @@ import java.util.List;
 public class ItemPlugBlock extends BaseEntityBlock {
 
     public static final MapCodec<ItemPlugBlock> CODEC = simpleCodec(ItemPlugBlock::new);
-    private static final VoxelShape SHAPE = box(2.0, 2.0, 2.0, 14.0, 14.0, 14.0);
+    private static final VoxelShape SHAPE = box(6.0, 6.0, 6.0, 10.0, 10.0, 10.0);
 
     public ItemPlugBlock(Properties props) {
         super(props);

@@ -37,7 +37,7 @@ import java.util.List;
 public class FluidPlugBlock extends BaseEntityBlock {
 
     public static final MapCodec<FluidPlugBlock> CODEC = simpleCodec(FluidPlugBlock::new);
-    private static final VoxelShape SHAPE = box(2.0, 2.0, 2.0, 14.0, 14.0, 14.0);
+    private static final VoxelShape SHAPE = box(6.0, 6.0, 6.0, 10.0, 10.0, 10.0);
 
     public FluidPlugBlock(Properties props) {
         super(props);
