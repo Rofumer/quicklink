@@ -260,8 +260,8 @@ public class ItemPlugBlockEntity extends BlockEntity {
         if ((gt % period) != 0L) return;
 
         for (Direction side : Direction.values()) {
-            if (be.isPointEnabled(side)) {
-                be.tryPullOnce(sl, side);
+            if (be.isPlugEnabled(side)) {
+                be.tryPushOnce(sl, side);
             }
         }
     }
@@ -275,29 +275,29 @@ public class ItemPlugBlockEntity extends BlockEntity {
     }
 
     private int receiveIntoNetwork(Direction inputSide, ItemStack stack, boolean simulate) {
-        if (stack.isEmpty() || !isPlugEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
+        if (stack.isEmpty() || !isPointEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
         int networkKey = getNetworkKey(inputSide);
-        List<QuickLinkNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
-        if (points.isEmpty()) return 0;
+        List<QuickLinkNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
+        if (plugs.isEmpty()) return 0;
 
         ItemStack remaining = stack.copy();
         int moved = 0;
         int start = rrIndexBySide[dirIndex(inputSide)];
 
-        for (int i = 0; i < points.size() && !remaining.isEmpty(); i++) {
-            int idx = (start + i) % points.size();
-            QuickLinkNetworkManager.GlobalPosRef ref = points.get(idx);
-            ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
-            if (pointLevel == null) continue;
+        for (int i = 0; i < plugs.size() && !remaining.isEmpty(); i++) {
+            int idx = (start + i) % plugs.size();
+            QuickLinkNetworkManager.GlobalPosRef ref = plugs.get(idx);
+            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
+            if (plugLevel == null) continue;
 
-            BlockEntity other = pointLevel.getBlockEntity(ref.pos());
-            if (!(other instanceof ItemPlugBlockEntity pointBe) || !pointBe.enabled) continue;
+            BlockEntity other = plugLevel.getBlockEntity(ref.pos());
+            if (!(other instanceof ItemPlugBlockEntity plugBe) || !plugBe.enabled) continue;
 
-            for (Direction pointSide : Direction.values()) {
-                if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
-                IItemHandler dst = getAttachedItemHandler(pointLevel, ref.pos(), pointSide);
+            for (Direction plugSide : Direction.values()) {
+                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
+                IItemHandler dst = getAttachedItemHandler(plugLevel, ref.pos(), plugSide);
                 if (dst == null) continue;
 
                 ItemStack before = remaining.copy();
@@ -305,7 +305,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
                 moved += before.getCount() - remaining.getCount();
 
                 if (before.getCount() != remaining.getCount() && !simulate) {
-                    rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % points.size();
+                    rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % plugs.size();
                     setChanged();
                 }
 
@@ -317,35 +317,35 @@ public class ItemPlugBlockEntity extends BlockEntity {
     }
 
     private ItemStack extractFromNetwork(Direction outputSide, int amount, boolean simulate) {
-        if (amount <= 0 || !isPointEnabled(outputSide) || !(level instanceof ServerLevel sl)) return ItemStack.EMPTY;
+        if (amount <= 0 || !isPlugEnabled(outputSide) || !(level instanceof ServerLevel sl)) return ItemStack.EMPTY;
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
         int networkKey = getNetworkKey(outputSide);
-        List<QuickLinkNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
-        if (plugs.isEmpty()) return ItemStack.EMPTY;
+        List<QuickLinkNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
+        if (points.isEmpty()) return ItemStack.EMPTY;
 
         int start = rrIndexBySide[dirIndex(outputSide)];
 
-        for (int i = 0; i < plugs.size(); i++) {
-            int idx = (start + i) % plugs.size();
-            QuickLinkNetworkManager.GlobalPosRef ref = plugs.get(idx);
-            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
-            if (plugLevel == null) continue;
+        for (int i = 0; i < points.size(); i++) {
+            int idx = (start + i) % points.size();
+            QuickLinkNetworkManager.GlobalPosRef ref = points.get(idx);
+            ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
+            if (pointLevel == null) continue;
 
-            BlockEntity other = plugLevel.getBlockEntity(ref.pos());
-            if (!(other instanceof ItemPlugBlockEntity plugBe) || !plugBe.enabled) continue;
+            BlockEntity other = pointLevel.getBlockEntity(ref.pos());
+            if (!(other instanceof ItemPlugBlockEntity pointBe) || !pointBe.enabled) continue;
 
-            for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
+            for (Direction pointSide : Direction.values()) {
+                if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
 
-                IItemHandler src = getAttachedItemHandler(plugLevel, ref.pos(), plugSide);
+                IItemHandler src = getAttachedItemHandler(pointLevel, ref.pos(), pointSide);
                 if (src == null) continue;
 
                 ItemStack extracted = extractAny(src, amount, simulate);
                 if (extracted.isEmpty()) continue;
 
                 if (!simulate) {
-                    rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % plugs.size();
+                    rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % points.size();
                     setChanged();
                 }
                 return extracted;
@@ -355,45 +355,45 @@ public class ItemPlugBlockEntity extends BlockEntity {
         return ItemStack.EMPTY;
     }
 
-    private void tryPullOnce(ServerLevel sl, Direction pointSide) {
-        IItemHandler dst = getAttachedItemHandler(sl, worldPosition, pointSide);
+    private void tryPushOnce(ServerLevel sl, Direction plugSide) {
+        IItemHandler dst = getAttachedItemHandler(sl, worldPosition, plugSide);
         if (dst == null) return;
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
-        int networkKey = getNetworkKey(pointSide);
-        List<QuickLinkNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
-        if (plugs.isEmpty()) return;
+        int networkKey = getNetworkKey(plugSide);
+        List<QuickLinkNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
+        if (points.isEmpty()) return;
 
-        int pIdx = dirIndex(pointSide);
+        int pIdx = dirIndex(plugSide);
         int start = rrIndexBySide[pIdx];
 
-        for (int i = 0; i < plugs.size(); i++) {
-            int idx = (start + i) % plugs.size();
-            QuickLinkNetworkManager.GlobalPosRef ref = plugs.get(idx);
-            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
-            if (plugLevel == null) continue;
+        for (int i = 0; i < points.size(); i++) {
+            int idx = (start + i) % points.size();
+            QuickLinkNetworkManager.GlobalPosRef ref = points.get(idx);
+            ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
+            if (pointLevel == null) continue;
 
-            BlockPos plugPos = ref.pos();
-            BlockEntity other = plugLevel.getBlockEntity(plugPos);
-            if (!(other instanceof ItemPlugBlockEntity plugBe)) continue;
-            if (!plugBe.enabled) continue;
+            BlockPos pointPos = ref.pos();
+            BlockEntity other = pointLevel.getBlockEntity(pointPos);
+            if (!(other instanceof ItemPlugBlockEntity pointBe)) continue;
+            if (!pointBe.enabled) continue;
 
-            for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
+            for (Direction pointSide : Direction.values()) {
+                if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
 
-                IItemHandler src = getAttachedItemHandler(plugLevel, plugPos, plugSide);
+                IItemHandler src = getAttachedItemHandler(pointLevel, pointPos, pointSide);
                 if (src == null) continue;
 
                 int moved = moveItems(src, dst, moveBatch);
                 if (moved > 0) {
-                    rrIndexBySide[pIdx] = (idx + 1) % plugs.size();
+                    rrIndexBySide[pIdx] = (idx + 1) % points.size();
                     setChanged();
                     return;
                 }
             }
         }
 
-        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % plugs.size();
+        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % Math.max(1, points.size());
         setChanged();
     }
 
@@ -498,7 +498,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
         @Override
         public boolean isItemValid(int slot, ItemStack stack) {
-            return slot == 0 && owner.isPlugEnabled(side);
+            return slot == 0 && owner.isPointEnabled(side);
         }
     }
 

@@ -207,7 +207,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         if ((gt % period) != 0L) return;
 
         for (Direction side : Direction.values()) {
-            if (be.isPointEnabled(side)) {
+            if (be.isPlugEnabled(side)) {
                 be.tryTransferOnce(sl, side, transferFE);
             }
         }
@@ -222,60 +222,16 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     }
 
     private int receiveIntoNetwork(Direction inputSide, int amount, boolean simulate) {
-        if (amount <= 0 || !isPlugEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
+        if (amount <= 0 || !isPointEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
 
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
         int networkKey = getNetworkKey(inputSide);
-        List<QuickLinkEnergyNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
-        if (points.isEmpty()) return 0;
-
-        int moved = 0;
-        int left = amount;
-        int start = rrIndexBySide[dirIndex(inputSide)];
-
-        for (int i = 0; i < points.size() && left > 0; i++) {
-            int idx = (start + i) % points.size();
-            QuickLinkEnergyNetworkManager.GlobalPosRef ref = points.get(idx);
-            ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
-            if (pointLevel == null) continue;
-
-            BlockEntity other = pointLevel.getBlockEntity(ref.pos());
-            if (!(other instanceof EnergyPlugBlockEntity pointBe) || !pointBe.enabled) continue;
-
-            for (Direction pointSide : Direction.values()) {
-                if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
-                IEnergyStorage dst = getAttachedEnergyStorage(pointLevel, ref.pos(), pointSide);
-                if (dst == null || !dst.canReceive()) continue;
-
-                int accepted = dst.receiveEnergy(left, simulate);
-                if (accepted <= 0) continue;
-
-                moved += accepted;
-                left -= accepted;
-
-                if (!simulate) {
-                    rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % points.size();
-                    setChanged();
-                }
-
-                if (left <= 0) break;
-            }
-        }
-
-        return moved;
-    }
-
-    private int extractFromNetwork(Direction outputSide, int amount, boolean simulate) {
-        if (amount <= 0 || !isPointEnabled(outputSide) || !(level instanceof ServerLevel sl)) return 0;
-
-        QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
-        int networkKey = getNetworkKey(outputSide);
         List<QuickLinkEnergyNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
         if (plugs.isEmpty()) return 0;
 
         int moved = 0;
         int left = amount;
-        int start = rrIndexBySide[dirIndex(outputSide)];
+        int start = rrIndexBySide[dirIndex(inputSide)];
 
         for (int i = 0; i < plugs.size() && left > 0; i++) {
             int idx = (start + i) % plugs.size();
@@ -288,18 +244,17 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
             for (Direction plugSide : Direction.values()) {
                 if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
+                IEnergyStorage dst = getAttachedEnergyStorage(plugLevel, ref.pos(), plugSide);
+                if (dst == null || !dst.canReceive()) continue;
 
-                IEnergyStorage src = getAttachedEnergyStorage(plugLevel, ref.pos(), plugSide);
-                if (src == null || !src.canExtract()) continue;
+                int accepted = dst.receiveEnergy(left, simulate);
+                if (accepted <= 0) continue;
 
-                int extracted = src.extractEnergy(left, simulate);
-                if (extracted <= 0) continue;
-
-                moved += extracted;
-                left -= extracted;
+                moved += accepted;
+                left -= accepted;
 
                 if (!simulate) {
-                    rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % plugs.size();
+                    rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % plugs.size();
                     setChanged();
                 }
 
@@ -310,44 +265,89 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         return moved;
     }
 
-    private void tryTransferOnce(ServerLevel sl, Direction pointSide, int amountFE) {
-        IEnergyStorage dst = getAttachedEnergyStorage(sl, worldPosition, pointSide);
+    private int extractFromNetwork(Direction outputSide, int amount, boolean simulate) {
+        if (amount <= 0 || !isPlugEnabled(outputSide) || !(level instanceof ServerLevel sl)) return 0;
+
+        QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
+        int networkKey = getNetworkKey(outputSide);
+        List<QuickLinkEnergyNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
+        if (points.isEmpty()) return 0;
+
+        int moved = 0;
+        int left = amount;
+        int start = rrIndexBySide[dirIndex(outputSide)];
+
+        for (int i = 0; i < points.size() && left > 0; i++) {
+            int idx = (start + i) % points.size();
+            QuickLinkEnergyNetworkManager.GlobalPosRef ref = points.get(idx);
+            ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
+            if (pointLevel == null) continue;
+
+            BlockEntity other = pointLevel.getBlockEntity(ref.pos());
+            if (!(other instanceof EnergyPlugBlockEntity pointBe) || !pointBe.enabled) continue;
+
+            for (Direction pointSide : Direction.values()) {
+                if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
+
+                IEnergyStorage src = getAttachedEnergyStorage(pointLevel, ref.pos(), pointSide);
+                if (src == null || !src.canExtract()) continue;
+
+                int extracted = src.extractEnergy(left, simulate);
+                if (extracted <= 0) continue;
+
+                moved += extracted;
+                left -= extracted;
+
+                if (!simulate) {
+                    rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % points.size();
+                    setChanged();
+                }
+
+                if (left <= 0) break;
+            }
+        }
+
+        return moved;
+    }
+
+    private void tryTransferOnce(ServerLevel sl, Direction plugSide, int amountFE) {
+        IEnergyStorage dst = getAttachedEnergyStorage(sl, worldPosition, plugSide);
         if (dst == null) return;
 
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
-        int networkKey = getNetworkKey(pointSide);
-        List<QuickLinkEnergyNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
-        if (plugs.isEmpty()) return;
+        int networkKey = getNetworkKey(plugSide);
+        List<QuickLinkEnergyNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
+        if (points.isEmpty()) return;
 
-        int pIdx = dirIndex(pointSide);
+        int pIdx = dirIndex(plugSide);
         int start = rrIndexBySide[pIdx];
 
-        for (int i = 0; i < plugs.size(); i++) {
-            int idx = (start + i) % plugs.size();
-            QuickLinkEnergyNetworkManager.GlobalPosRef ref = plugs.get(idx);
-            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
-            if (plugLevel == null) continue;
+        for (int i = 0; i < points.size(); i++) {
+            int idx = (start + i) % points.size();
+            QuickLinkEnergyNetworkManager.GlobalPosRef ref = points.get(idx);
+            ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
+            if (pointLevel == null) continue;
 
-            BlockPos plugPos = ref.pos();
-            BlockEntity other = plugLevel.getBlockEntity(plugPos);
-            if (!(other instanceof EnergyPlugBlockEntity plugBe)) continue;
-            if (!plugBe.enabled) continue;
+            BlockPos pointPos = ref.pos();
+            BlockEntity other = pointLevel.getBlockEntity(pointPos);
+            if (!(other instanceof EnergyPlugBlockEntity pointBe)) continue;
+            if (!pointBe.enabled) continue;
 
-            for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
+            for (Direction pointSide : Direction.values()) {
+                if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
 
-                IEnergyStorage src = getAttachedEnergyStorage(plugLevel, plugPos, plugSide);
+                IEnergyStorage src = getAttachedEnergyStorage(pointLevel, pointPos, pointSide);
                 if (src == null) continue;
 
                 if (moveEnergy(src, dst, amountFE)) {
-                    rrIndexBySide[pIdx] = (idx + 1) % plugs.size();
+                    rrIndexBySide[pIdx] = (idx + 1) % points.size();
                     setChanged();
                     return;
                 }
             }
         }
 
-        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % plugs.size();
+        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % Math.max(1, points.size());
         setChanged();
     }
 
@@ -359,6 +359,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         if (be instanceof EnergyPlugBlockEntity plug) {
             return plug.getExternalEnergyStorage(targetFaceTowardUs);
         }
+        // TODO: query external energy containers via Team Reborn Energy API or Architectury energy bridge
+        // Currently only EnergyPlugBlockEntity neighbors work on Fabric
         return null;
     }
 
@@ -412,12 +414,12 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
         @Override
         public boolean canExtract() {
-            return owner.isPointEnabled(side);
+            return owner.isPlugEnabled(side);
         }
 
         @Override
         public boolean canReceive() {
-            return owner.isPlugEnabled(side);
+            return owner.isPointEnabled(side);
         }
     }
 

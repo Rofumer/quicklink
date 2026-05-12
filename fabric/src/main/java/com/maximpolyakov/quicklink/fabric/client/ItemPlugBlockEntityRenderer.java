@@ -41,9 +41,9 @@ public class ItemPlugBlockEntityRenderer implements BlockEntityRenderer<ItemPlug
     // ============================
 
     // ===== Leg / cone knobs =====
-    private static final float STEM_HALF      = 1.0f / 16f;
-    private static final float CONE_BASE_HALF = 1.5f / 16f;
-    private static final float CONE_LENGTH    = 2.5f / 16f;
+    private static final float STEM_HALF      = 0.5f / 16f;
+    private static final float CONE_BASE_HALF = 0.8f / 16f;
+    private static final float CONE_LENGTH    = 2.0f / 16f;
     private static final float LEG_ALPHA      = 1.0f;
 
     // PLUG = orange

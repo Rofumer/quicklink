@@ -18,7 +18,11 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
 
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.fluids.FluidStack;
@@ -226,7 +230,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
     public boolean toggleInfiniteWater(Direction side) {
         SideRole role = getRole(side);
-        if (role != SideRole.PLUG && role != SideRole.BOTH) return false;
+        if (role != SideRole.POINT && role != SideRole.BOTH) return false;
 
         int idx = dirIndex(side);
         int b = bit(side);
@@ -328,11 +332,10 @@ public class FluidPlugBlockEntity extends BlockEntity {
         //if ((gt % TICK_PERIOD) != 0L) return;
         if ((gt % period) != 0L) return;
 
-        // try for each enabled POINT side
-        for (Direction pointSide : Direction.values()) {
-            if (be.isPointEnabled(pointSide)) {
-                //be.tryTransferOnce(sl, pointSide, TRANSFER_MB);
-                be.tryTransferOnce(sl, pointSide, amountMB);
+        // try for each enabled PLUG side
+        for (Direction plugSide : Direction.values()) {
+            if (be.isPlugEnabled(plugSide)) {
+                be.tryTransferOnce(sl, plugSide, amountMB);
             }
         }
     }
@@ -346,7 +349,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
     }
 
     private int fillIntoNetwork(Direction inputSide, FluidStack resource, IFluidHandler.FluidAction action) {
-        if (resource.isEmpty() || !isPlugEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
+        if (resource.isEmpty() || !isPointEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
         int networkKey = getNetworkKey(inputSide);
@@ -367,13 +370,17 @@ public class FluidPlugBlockEntity extends BlockEntity {
             if (!(other instanceof FluidPlugBlockEntity pointBe) || !pointBe.enabled) continue;
 
             for (Direction pointSide : Direction.values()) {
-                if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
-                IFluidHandler dst = getAttachedFluidHandler(pointLevel, ref.pos(), pointSide);
-                if (dst == null) continue;
+                if (!pointBe.isPlugEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
+                List<IFluidHandler> dsts = getAllFillHandlers(pointLevel, ref.pos(), pointSide);
+                if (dsts.isEmpty()) continue;
 
                 FluidStack toFill = resource.copy();
                 toFill.setAmount(left);
-                int accepted = dst.fill(toFill, action);
+                int accepted = 0;
+                for (IFluidHandler dst : dsts) {
+                    accepted = dst.fill(toFill, action);
+                    if (accepted > 0) break;
+                }
                 if (accepted <= 0) continue;
 
                 moved += accepted;
@@ -392,7 +399,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
     }
 
     private FluidStack drainFromNetwork(Direction outputSide, int amount, @Nullable FluidStack match, IFluidHandler.FluidAction action) {
-        if (amount <= 0 || !isPointEnabled(outputSide) || !(level instanceof ServerLevel sl)) return FluidStack.EMPTY;
+        if (amount <= 0 || !isPlugEnabled(outputSide) || !(level instanceof ServerLevel sl)) return FluidStack.EMPTY;
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
         int networkKey = getNetworkKey(outputSide);
@@ -411,7 +418,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
             if (!(other instanceof FluidPlugBlockEntity plugBe) || !plugBe.enabled) continue;
 
             for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
+                if (!plugBe.isPointEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
 
                 if (plugBe.isInfiniteWater(plugSide)) {
                     if (match != null && !match.isEmpty() && !match.is(Fluids.WATER)) continue;
@@ -424,7 +431,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
                     return provided;
                 }
 
-                IFluidHandler src = getAttachedFluidHandler(plugLevel, ref.pos(), plugSide);
+                IFluidHandler src = getAttachedFluidHandlerForDrain(plugLevel, ref.pos(), plugSide);
                 if (src == null) continue;
 
                 FluidStack drained = (match == null)
@@ -447,32 +454,32 @@ public class FluidPlugBlockEntity extends BlockEntity {
      * For one POINT side: pull up to amountMB from any PLUG side of any plug-block in same network
      * into destination handler attached to this pointSide.
      */
-    private void tryTransferOnce(ServerLevel sl, Direction pointSide, int amountMB) {
-        int networkKey = getNetworkKey(pointSide);
+    private void tryTransferOnce(ServerLevel sl, Direction plugSide, int amountMB) {
+        int networkKey = getNetworkKey(plugSide);
         int key = networkKey;
 
-        IFluidHandler dst = getAttachedFluidHandler(sl, worldPosition, pointSide);
+        List<IFluidHandler> dsts = getAllFillHandlers(sl, worldPosition, plugSide);
         if (DBG_TRANSFER) {
-            System.out.println("[QLF][DBG] point@" + worldPosition + " side=" + pointSide
+            System.out.println("[QLF][DBG] plug@" + worldPosition + " side=" + plugSide
                     + " key=" + key + " enabled=" + enabled
                     + " plugMask=" + Integer.toBinaryString(plugMask)
                     + " pointMask=" + Integer.toBinaryString(pointMask)
                     + " disabled=" + Integer.toBinaryString(disabledMask));
-            System.out.println("[QLF][DBG] dst=" + (dst == null ? "null" : ("tanks=" + dst.getTanks())));
+            System.out.println("[QLF][DBG] dst handlers=" + dsts.size());
         }
-        if (dst == null) return;
+        if (dsts.isEmpty()) return;
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
-        List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(key);
-        if (DBG_TRANSFER) System.out.println("[QLF][DBG] plugs=" + plugs.size());
-        if (plugs.isEmpty()) return;
+        List<QuickLinkFluidNetworkManager.GlobalPosRef> sources = mgr.getPointsSnapshot(key);
+        if (DBG_TRANSFER) System.out.println("[QLF][DBG] sources=" + sources.size());
+        if (sources.isEmpty()) return;
 
-        int pIdx = dirIndex(pointSide);
+        int pIdx = dirIndex(plugSide);
         int start = rrIndexBySide[pIdx];
 
-        for (int i = 0; i < plugs.size(); i++) {
-            int idx = (start + i) % plugs.size();
-            QuickLinkFluidNetworkManager.GlobalPosRef ref = plugs.get(idx);
+        for (int i = 0; i < sources.size(); i++) {
+            int idx = (start + i) % sources.size();
+            QuickLinkFluidNetworkManager.GlobalPosRef ref = sources.get(idx);
             ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
             if (plugLevel == null) continue;
 
@@ -482,53 +489,66 @@ public class FluidPlugBlockEntity extends BlockEntity {
             if (!plugBe.enabled) continue;
 
             if (DBG_TRANSFER) {
-                boolean anyPlugSide = (plugBe.plugMask & ~plugBe.disabledMask) != 0;
-                System.out.println("[QLF][DBG] plug@" + plugPos + " plugEnabledAny=" + anyPlugSide + " enabled=" + plugBe.enabled);
+                boolean anyPointSide = (plugBe.pointMask & ~plugBe.disabledMask) != 0;
+                System.out.println("[QLF][DBG] source@" + plugPos + " pointEnabledAny=" + anyPointSide + " enabled=" + plugBe.enabled);
             }
 
             boolean moved = false;
 
-            // iterate all enabled PLUG sides of that BE
-            for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
+            // iterate all enabled POINT sides of that BE
+            for (Direction pointSide : Direction.values()) {
+                if (!plugBe.isPointEnabled(pointSide) || plugBe.getNetworkKey(pointSide) != networkKey) continue;
 
-                if (plugBe.isInfiniteWater(plugSide)) {
-                    if (pushInfiniteWater(dst, plugBe, plugSide)) {
+                if (plugBe.isInfiniteWater(pointSide)) {
+                    if (pushInfiniteWater(dsts, plugBe, pointSide)) {
                         moved = true;
                         break;
                     }
                     continue;
                 }
 
-                IFluidHandler src = getAttachedFluidHandler(plugLevel, plugPos, plugSide);
-                if (DBG_TRANSFER) System.out.println("[QLF][DBG] src=" + (src == null ? "null" : ("tanks=" + src.getTanks()))
-                        + " at plug@" + plugPos + " side=" + plugSide);
+                IFluidHandler src = getAttachedFluidHandlerForDrain(plugLevel, plugPos, pointSide);
+                if (DBG_TRANSFER) System.out.println("[QLF][DBG] src=" + (src == null ? "null" : ("tanks=" + src.getTanks()
+                        + " class=" + src.getClass().getName()
+                        + " tank0=" + src.getFluidInTank(0)))
+                        + " at point@" + plugPos + " side=" + pointSide);
                 if (src == null) continue;
 
-                if (moveFluid(src, dst, amountMB)) {
+                if (moveFluidAny(src, dsts, amountMB)) {
                     moved = true;
                     break;
                 }
             }
 
             if (moved) {
-                rrIndexBySide[pIdx] = (idx + 1) % plugs.size();
+                rrIndexBySide[pIdx] = (idx + 1) % sources.size();
                 setChanged(); // persist RR
                 return;
             }
         }
 
-        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % plugs.size();
+        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size();
         setChanged();
     }
 
-    private static boolean pushInfiniteWater(IFluidHandler dst, FluidPlugBlockEntity plugBe, Direction plugSide) {
-        int idx = dirIndex(plugSide);
+    private static boolean pushInfiniteWater(List<IFluidHandler> dsts, FluidPlugBlockEntity plugBe, Direction pointSide) {
+        int idx = dirIndex(pointSide);
 
         long rateMb = QuickLinkConfig.FLUID_INFINITE_MB_PER_TICK.get();
         int maxChunk = QuickLinkConfig.FLUID_INFINITE_MAX_PUSH_PER_TICK.get();
 
         plugBe.waterAccumBySide[idx] += rateMb;
+
+        // Find the first handler that can accept water
+        FluidStack probe = new FluidStack(Fluids.WATER, 1);
+        IFluidHandler dst = null;
+        for (IFluidHandler h : dsts) {
+            if (h.fill(probe, IFluidHandler.FluidAction.SIMULATE) > 0) {
+                dst = h;
+                break;
+            }
+        }
+        if (dst == null) return false;
 
         boolean movedAny = false;
         for (int i = 0; i < 8; i++) {
@@ -551,43 +571,84 @@ public class FluidPlugBlockEntity extends BlockEntity {
     }
 
     /**
-     * IMPORTANT:
-     * target is "behind" the face: target = selfPos.relative(side.getOpposite())
-     *
-     * Capability query side MUST be the TARGET's side that touches us, i.e. 'side' (not opposite).
-     * This is the common bug that makes dst/src null with tanks.
+     * Query the fluid handler of the block adjacent on 'side', for use as a DRAIN SOURCE.
+     * Uses directed capability (respects Mekanism output-side restrictions).
      */
     @Nullable
-    private static IFluidHandler getAttachedFluidHandler(ServerLevel level, BlockPos selfPos, Direction side) {
-        // Ищем соседний блок НА ЭТОЙ стороне
+    private static IFluidHandler getAttachedFluidHandlerForDrain(ServerLevel level, BlockPos selfPos, Direction side) {
         BlockPos target = selfPos.relative(side);
-        // А capability у соседа спрашиваем со стороны, которая СМОТРИТ НА НАС
         Direction targetFaceTowardUs = side.getOpposite();
+        BlockEntity be = level.getBlockEntity(target);
+        if (be instanceof FluidPlugBlockEntity plug) {
+            return plug.getExternalFluidHandler(targetFaceTowardUs);
+        }
         return level.getCapability(Capabilities.FluidHandler.BLOCK, target, targetFaceTowardUs);
     }
 
     /**
-     * Move up to amountMB from src -> dst.
+     * Returns all unique fluid handlers on the adjacent block for use as fill destinations.
+     * Tries null direction and all 6 faces so that mods like Mekanism (which block fills on
+     * OUTPUT-configured sides) can still be filled via an INPUT-configured face.
+     */
+    private static List<IFluidHandler> getAllFillHandlers(ServerLevel level, BlockPos selfPos, Direction side) {
+        BlockPos target = selfPos.relative(side);
+        BlockEntity be = level.getBlockEntity(target);
+
+        if (be instanceof FluidPlugBlockEntity plug) {
+            IFluidHandler h = plug.getExternalFluidHandler(side.getOpposite());
+            return h != null ? List.of(h) : List.of();
+        }
+
+        List<IFluidHandler> result = new ArrayList<>();
+        Set<IFluidHandler> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+
+        IFluidHandler h = level.getCapability(Capabilities.FluidHandler.BLOCK, target, null);
+        if (h != null && seen.add(h)) result.add(h);
+
+        for (Direction d : Direction.values()) {
+            h = level.getCapability(Capabilities.FluidHandler.BLOCK, target, d);
+            if (h != null && seen.add(h)) result.add(h);
+        }
+
+        return result;
+    }
+
+    /**
+     * Move up to amountMB from src into the first dst handler (from the list) that accepts fluid.
+     * Simulates drain first, then probes each dst with a fill simulation before executing.
      * Returns true if anything actually moved.
      */
-    private static boolean moveFluid(IFluidHandler src, IFluidHandler dst, int amountMB) {
-        if (amountMB <= 0) return false;
+    private static boolean moveFluidAny(IFluidHandler src, List<IFluidHandler> dsts, int amountMB) {
+        if (amountMB <= 0 || dsts.isEmpty()) return false;
 
         FluidStack canDrain = src.drain(amountMB, IFluidHandler.FluidAction.SIMULATE);
         if (DBG_TRANSFER) System.out.println("[QLF][DBG] drainSim=" + (canDrain.isEmpty() ? "EMPTY" : (canDrain.getAmount() + " " + canDrain.getFluid())));
         if (canDrain.isEmpty() || canDrain.getAmount() <= 0) return false;
 
-        int canFill = dst.fill(canDrain, IFluidHandler.FluidAction.SIMULATE);
-        if (DBG_TRANSFER) System.out.println("[QLF][DBG] fillSim=" + canFill);
-        if (canFill <= 0) return false;
+        IFluidHandler chosenDst = null;
+        int chosenFill = 0;
+        for (IFluidHandler dst : dsts) {
+            if (DBG_TRANSFER) System.out.println("[QLF][DBG] dst class=" + dst.getClass().getName()
+                    + " tank0=" + dst.getFluidInTank(0).getAmount() + " " + (dst.getFluidInTank(0).isEmpty() ? "empty" : dst.getFluidInTank(0).getFluid())
+                    + " cap=" + dst.getTankCapacity(0));
+            int canFill = dst.fill(canDrain, IFluidHandler.FluidAction.SIMULATE);
+            if (DBG_TRANSFER) System.out.println("[QLF][DBG] fillSim=" + canFill);
+            if (canFill > 0) {
+                chosenDst = dst;
+                chosenFill = canFill;
+                break;
+            }
+        }
 
-        int toMove = Math.min(canDrain.getAmount(), canFill);
+        if (chosenDst == null) return false;
+
+        int toMove = Math.min(canDrain.getAmount(), chosenFill);
         if (toMove <= 0) return false;
 
         FluidStack drained = src.drain(toMove, IFluidHandler.FluidAction.EXECUTE);
         if (drained.isEmpty() || drained.getAmount() <= 0) return false;
 
-        int filled = dst.fill(drained, IFluidHandler.FluidAction.EXECUTE);
+        int filled = chosenDst.fill(drained, IFluidHandler.FluidAction.EXECUTE);
         if (DBG_TRANSFER) System.out.println("[QLF][DBG] drained=" + drained.getAmount() + " filled=" + filled);
         return filled > 0;
     }
@@ -615,7 +676,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
         @Override
         public boolean isFluidValid(int tank, FluidStack stack) {
-            return owner.isPlugEnabled(side);
+            return owner.isPointEnabled(side);
         }
 
         @Override
@@ -636,7 +697,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
     }
 
     private FluidStack peekNetworkFluid(Direction outputSide) {
-        if (!isPointEnabled(outputSide) || !(level instanceof ServerLevel sl)) return FluidStack.EMPTY;
+        if (!isPlugEnabled(outputSide) || !(level instanceof ServerLevel sl)) return FluidStack.EMPTY;
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
         int networkKey = getNetworkKey(outputSide);
@@ -651,13 +712,13 @@ public class FluidPlugBlockEntity extends BlockEntity {
             if (!(other instanceof FluidPlugBlockEntity plugBe) || !plugBe.enabled) continue;
 
             for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
+                if (!plugBe.isPointEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
 
                 if (plugBe.isInfiniteWater(plugSide)) {
                     return new FluidStack(Fluids.WATER, 1);
                 }
 
-                IFluidHandler src = getAttachedFluidHandler(plugLevel, ref.pos(), plugSide);
+                IFluidHandler src = getAttachedFluidHandlerForDrain(plugLevel, ref.pos(), plugSide);
                 if (src == null) continue;
 
                 FluidStack simulated = src.drain(1, IFluidHandler.FluidAction.SIMULATE);
@@ -730,7 +791,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
             for (int i = 0; i < 6; i++) waterAccumBySide[i] = 0L;
         }
 
-        // keep infinite-water only on PLUG sides
-        infiniteWaterMask &= plugMask;
+        // keep infinite-water only on POINT sides
+        infiniteWaterMask &= pointMask;
     }
 }
