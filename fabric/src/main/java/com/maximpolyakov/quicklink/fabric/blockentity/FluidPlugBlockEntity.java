@@ -465,71 +465,43 @@ public class FluidPlugBlockEntity extends BlockEntity {
      */
     private void tryTransferOnce(ServerLevel sl, Direction plugSide, int amountMB) {
         int networkKey = getNetworkKey(plugSide);
-        int key = networkKey;
 
         List<IFluidHandler> dsts = getAllFillHandlers(sl, worldPosition, plugSide);
-        if (DBG_TRANSFER) {
-            System.out.println("[QLF][DBG] plug@" + worldPosition + " side=" + plugSide
-                    + " key=" + key + " enabled=" + enabled
-                    + " plugMask=" + Integer.toBinaryString(plugMask)
-                    + " pointMask=" + Integer.toBinaryString(pointMask)
-                    + " disabled=" + Integer.toBinaryString(disabledMask));
-            System.out.println("[QLF][DBG] dst handlers=" + dsts.size());
-        }
         if (dsts.isEmpty()) return;
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
-        List<QuickLinkFluidNetworkManager.GlobalPosRef> sources = mgr.getPointsSnapshot(key);
-        if (DBG_TRANSFER) System.out.println("[QLF][DBG] sources=" + sources.size());
+
+        record Src(ServerLevel lvl, BlockPos pos, Direction dir, FluidPlugBlockEntity be) {}
+        List<Src> sources = new ArrayList<>();
+        for (QuickLinkFluidNetworkManager.GlobalPosRef ref : mgr.getPointsSnapshot(networkKey)) {
+            ServerLevel pl = sl.getServer().getLevel(ref.dimension());
+            if (pl == null) continue;
+            BlockEntity be = pl.getBlockEntity(ref.pos());
+            if (!(be instanceof FluidPlugBlockEntity pBe) || !pBe.enabled) continue;
+            for (Direction d : Direction.values()) {
+                if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
+                sources.add(new Src(pl, ref.pos(), d, pBe));
+            }
+        }
         if (sources.isEmpty()) return;
 
         int pIdx = dirIndex(plugSide);
-        int start = rrIndexBySide[pIdx];
+        int start = rrIndexBySide[pIdx] % sources.size();
 
         for (int i = 0; i < sources.size(); i++) {
             int idx = (start + i) % sources.size();
-            QuickLinkFluidNetworkManager.GlobalPosRef ref = sources.get(idx);
-            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
-            if (plugLevel == null) continue;
-
-            BlockPos plugPos = ref.pos();
-            BlockEntity other = plugLevel.getBlockEntity(plugPos);
-            if (!(other instanceof FluidPlugBlockEntity plugBe)) continue;
-            if (!plugBe.enabled) continue;
-
-            if (DBG_TRANSFER) {
-                boolean anyPointSide = (plugBe.pointMask & ~plugBe.disabledMask) != 0;
-                System.out.println("[QLF][DBG] source@" + plugPos + " pointEnabledAny=" + anyPointSide + " enabled=" + plugBe.enabled);
-            }
-
-            boolean moved = false;
-
-            // iterate all enabled POINT sides of that BE
-            for (Direction pointSide : Direction.values()) {
-                if (!plugBe.isPointEnabled(pointSide) || plugBe.getNetworkKey(pointSide) != networkKey) continue;
-
-                if (plugBe.isInfiniteWater(pointSide)) {
-                    if (pushInfiniteWater(dsts, plugBe, pointSide)) {
-                        moved = true;
-                        break;
-                    }
-                    continue;
-                }
-
-                IFluidHandler src = getAttachedFluidHandlerForDrain(plugLevel, plugPos, pointSide);
-                if (DBG_TRANSFER) System.out.println("[QLF][DBG] src=" + (src == null ? "null" : ("tanks=" + src.getTanks()))
-                        + " at point@" + plugPos + " side=" + pointSide);
+            Src s = sources.get(idx);
+            boolean moved;
+            if (s.be().isInfiniteWater(s.dir())) {
+                moved = pushInfiniteWater(dsts, s.be(), s.dir());
+            } else {
+                IFluidHandler src = getAttachedFluidHandlerForDrain(s.lvl(), s.pos(), s.dir());
                 if (src == null) continue;
-
-                if (moveFluidAny(src, dsts, amountMB)) {
-                    moved = true;
-                    break;
-                }
+                moved = moveFluidAny(src, dsts, amountMB);
             }
-
             if (moved) {
                 rrIndexBySide[pIdx] = (idx + 1) % sources.size();
-                setChanged(); // persist RR
+                setChanged();
                 return;
             }
         }

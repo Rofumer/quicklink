@@ -21,6 +21,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.neoforge.items.IItemHandler;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class ItemPlugBlockEntity extends BlockEntity {
@@ -360,39 +361,39 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
         int networkKey = getNetworkKey(plugSide);
-        List<QuickLinkNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
-        if (points.isEmpty()) return;
+
+        record Src(ServerLevel lvl, BlockPos pos, Direction dir) {}
+        List<Src> sources = new ArrayList<>();
+        for (QuickLinkNetworkManager.GlobalPosRef ref : mgr.getPointsSnapshot(networkKey)) {
+            ServerLevel pl = sl.getServer().getLevel(ref.dimension());
+            if (pl == null) continue;
+            BlockEntity be = pl.getBlockEntity(ref.pos());
+            if (!(be instanceof ItemPlugBlockEntity pBe) || !pBe.enabled) continue;
+            for (Direction d : Direction.values()) {
+                if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
+                sources.add(new Src(pl, ref.pos(), d));
+            }
+        }
+        if (sources.isEmpty()) return;
 
         int pIdx = dirIndex(plugSide);
-        int start = rrIndexBySide[pIdx];
+        int start = rrIndexBySide[pIdx] % sources.size();
 
-        for (int i = 0; i < points.size(); i++) {
-            int idx = (start + i) % points.size();
-            QuickLinkNetworkManager.GlobalPosRef ref = points.get(idx);
-            ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
-            if (pointLevel == null) continue;
+        for (int i = 0; i < sources.size(); i++) {
+            int idx = (start + i) % sources.size();
+            Src s = sources.get(idx);
+            IItemHandler src = getAttachedItemHandler(s.lvl(), s.pos(), s.dir());
+            if (src == null) continue;
 
-            BlockPos pointPos = ref.pos();
-            BlockEntity other = pointLevel.getBlockEntity(pointPos);
-            if (!(other instanceof ItemPlugBlockEntity pointBe)) continue;
-            if (!pointBe.enabled) continue;
-
-            for (Direction pointSide : Direction.values()) {
-                if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
-
-                IItemHandler src = getAttachedItemHandler(pointLevel, pointPos, pointSide);
-                if (src == null) continue;
-
-                int moved = moveItems(src, dst, moveBatch);
-                if (moved > 0) {
-                    rrIndexBySide[pIdx] = (idx + 1) % points.size();
-                    setChanged();
-                    return;
-                }
+            int moved = moveItems(src, dst, moveBatch);
+            if (moved > 0) {
+                rrIndexBySide[pIdx] = (idx + 1) % sources.size();
+                setChanged();
+                return;
             }
         }
 
-        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % Math.max(1, points.size());
+        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size();
         setChanged();
     }
 
