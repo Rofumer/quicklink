@@ -429,6 +429,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         tag.putIntArray(QuickLinkNbt.SIDE_COLORS, getSideColorsPacked());
         tag.putInt(QuickLinkNbt.COLORS, sideColors[0].pack());
         tag.putBoolean(QuickLinkNbt.ENABLED, enabled);
+        tag.putInt("ql_schema", 1);
         tag.putInt("ql_plug_mask", clampMask6(plugMask));
         tag.putInt("ql_point_mask", clampMask6(pointMask));
         tag.putInt("ql_disabled_mask", clampMask6(disabledMask));
@@ -456,6 +457,9 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
         plugMask = clampMask6(tag.getInt("ql_plug_mask"));
         pointMask = clampMask6(tag.getInt("ql_point_mask"));
+        if (!tag.contains("ql_schema")) {
+            int tmp = plugMask; plugMask = pointMask; pointMask = tmp;
+        }
         disabledMask = clampMask6(tag.getInt("ql_disabled_mask"));
 
         int[] arr = tag.getIntArray("ql_rr_side");
