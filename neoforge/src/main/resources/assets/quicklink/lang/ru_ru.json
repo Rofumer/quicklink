@@ -1,0 +1,14 @@
+{
+  "block.quicklink.item_plug": "Item Plug",
+  "block.quicklink.fluid_plug": "Fluid Plug",
+  "block.quicklink.energy_plug": "Energy Plug",
+  "item.quicklink.quicklink_upgrade": "Апгрейд QuickLink",
+
+  "tooltip.block.quicklink.item_plug.1":   "Переносит предметы между инвентарями. Сторона PLUG — источник, POINT — приёмник.",
+  "tooltip.block.quicklink.fluid_plug.1":  "Переносит жидкости между резервуарами. Сторона PLUG — источник, POINT — приёмник.",
+  "tooltip.block.quicklink.energy_plug.1": "Переносит FE-энергию между машинами. Сторона PLUG — источник, POINT — приёмник.",
+  "tooltip.quicklink.plug.use": "Одинаковый цвет = соединены. ПКМ: роль | Shift+ПКМ: вкл/выкл / снять апгрейд | Краситель: цвет",
+
+  "tooltip.item.quicklink.quicklink_upgrade.1": "Ускоряет передачу: уровень 1=×2, 2=×4, 3=×8, 4=×16.",
+  "tooltip.item.quicklink.quicklink_upgrade.2": "ПКМ по блоку: установить | Shift+ПКМ пустой рукой по блоку: снять"
+}

@@ -1,0 +1,14 @@
+{
+  "block.quicklink.item_plug": "物品插座",
+  "block.quicklink.fluid_plug": "流体插座",
+  "block.quicklink.energy_plug": "能量插座",
+  "item.quicklink.quicklink_upgrade": "QuickLink 升级芯片",
+
+  "tooltip.block.quicklink.item_plug.1":   "在物品栏之间传输物品。PLUG 面为出口，POINT 面为入口。",
+  "tooltip.block.quicklink.fluid_plug.1":  "在储液罐之间传输流体。PLUG 面为出口，POINT 面为入口。",
+  "tooltip.block.quicklink.energy_plug.1": "在 FE 机器之间传输能量。PLUG 面为出口，POINT 面为入口。",
+  "tooltip.quicklink.plug.use": "同色=相连。右键:切换角色 | Shift+右键:启停/移除升级 | 染料:设置颜色",
+
+  "tooltip.item.quicklink.quicklink_upgrade.1": "提升插座传输速度：等级 1=×2, 2=×4, 3=×8, 4=×16。",
+  "tooltip.item.quicklink.quicklink_upgrade.2": "右键点击插座：安装 | 空手 Shift+右键点击插座：移除"
+}

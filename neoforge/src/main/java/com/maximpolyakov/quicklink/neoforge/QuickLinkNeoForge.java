@@ -1,6 +1,7 @@
 package com.maximpolyakov.quicklink.neoforge;
 
 import com.maximpolyakov.quicklink.neoforge.config.QuickLinkConfig;
+import com.maximpolyakov.quicklink.neoforge.item.QuickLinkPlugBlockItem;
 import com.maximpolyakov.quicklink.neoforge.item.QuickLinkUpgradeItem;
 import net.neoforged.fml.config.ModConfig;
 import com.maximpolyakov.quicklink.QuickLink;
@@ -44,7 +45,7 @@ public final class QuickLinkNeoForge {
 
 
     public static final DeferredHolder<Item, Item> ITEM_PLUG_ITEM =
-            ITEMS.register("item_plug", () -> new BlockItem(ITEM_PLUG.get(), new Item.Properties()));
+            ITEMS.register("item_plug", () -> new QuickLinkPlugBlockItem(ITEM_PLUG.get(), new Item.Properties()));
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<ItemPlugBlockEntity>> ITEM_PLUG_BE =
             BLOCK_ENTITIES.register("item_plug",
@@ -57,7 +58,7 @@ public final class QuickLinkNeoForge {
 
     public static final DeferredHolder<Item, BlockItem> FLUID_PLUG_ITEM = ITEMS.register(
             "fluid_plug",
-            () -> new BlockItem(FLUID_PLUG_BLOCK.get(), new Item.Properties())
+            () -> new QuickLinkPlugBlockItem(FLUID_PLUG_BLOCK.get(), new Item.Properties())
     );
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<FluidPlugBlockEntity>> FLUID_PLUG_BE =
@@ -77,7 +78,7 @@ public final class QuickLinkNeoForge {
 
     public static final DeferredHolder<Item, BlockItem> ENERGY_PLUG_ITEM = ITEMS.register(
             "energy_plug",
-            () -> new BlockItem(ENERGY_PLUG_BLOCK.get(), new Item.Properties())
+            () -> new QuickLinkPlugBlockItem(ENERGY_PLUG_BLOCK.get(), new Item.Properties())
     );
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<EnergyPlugBlockEntity>> ENERGY_PLUG_BE =
