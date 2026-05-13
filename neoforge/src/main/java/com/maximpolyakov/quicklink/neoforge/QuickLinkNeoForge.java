@@ -1,6 +1,7 @@
 package com.maximpolyakov.quicklink.neoforge;
 
 import com.maximpolyakov.quicklink.neoforge.config.QuickLinkConfig;
+import com.maximpolyakov.quicklink.neoforge.item.QuickLinkUpgradeItem;
 import net.neoforged.fml.config.ModConfig;
 import com.maximpolyakov.quicklink.QuickLink;
 import com.maximpolyakov.quicklink.neoforge.block.FluidPlugBlock;
@@ -66,6 +67,9 @@ public final class QuickLinkNeoForge {
                             .build(null)
             );
 
+    public static final DeferredHolder<Item, Item> UPGRADE_ITEM =
+            ITEMS.register("quicklink_upgrade", () -> new QuickLinkUpgradeItem(new Item.Properties().stacksTo(64)));
+
     public static final DeferredHolder<Block, EnergyPlugBlock> ENERGY_PLUG_BLOCK = BLOCKS.register(
             "energy_plug",
             () -> new EnergyPlugBlock(BlockBehaviour.Properties.of().strength(0.3F).noOcclusion())
@@ -112,6 +116,7 @@ public final class QuickLinkNeoForge {
             e.accept(ITEM_PLUG_ITEM.get());
             e.accept(FLUID_PLUG_ITEM.get());
             e.accept(ENERGY_PLUG_ITEM.get());
+            e.accept(UPGRADE_ITEM.get());
         }
     }
 }

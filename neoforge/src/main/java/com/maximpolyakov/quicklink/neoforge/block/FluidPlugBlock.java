@@ -3,13 +3,17 @@ package com.maximpolyakov.quicklink.neoforge.block;
 import com.maximpolyakov.quicklink.QuickLinkColors;
 import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
+import com.maximpolyakov.quicklink.neoforge.UpgradeTier;
 import com.maximpolyakov.quicklink.neoforge.blockentity.FluidPlugBlockEntity;
+import com.maximpolyakov.quicklink.neoforge.item.QuickLinkUpgradeItem;
 import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.ItemInteractionResult;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.LivingEntity;
@@ -83,7 +87,8 @@ public class FluidPlugBlock extends BaseEntityBlock {
                                            Player player, InteractionHand hand, BlockHitResult hit) {
 
         if (level.isClientSide) {
-            if (stack.getItem() instanceof DyeItem || stack.isEmpty() || stack.is(Items.WATER_BUCKET)) {
+            if (stack.getItem() instanceof DyeItem || stack.isEmpty()
+                    || stack.is(Items.WATER_BUCKET) || stack.getItem() instanceof QuickLinkUpgradeItem) {
                 return ItemInteractionResult.SUCCESS;
             }
             return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
@@ -96,9 +101,32 @@ public class FluidPlugBlock extends BaseEntityBlock {
 
         Direction face = hit.getDirection();
 
-        // Empty hand: roles / enable per clicked face
+        // Upgrade item: install upgrade
+        if (stack.getItem() instanceof QuickLinkUpgradeItem) {
+            if (be.getUpgradeTier() >= UpgradeTier.MAX_TIER) {
+                player.sendSystemMessage(Component.literal("Already at max tier " + UpgradeTier.MAX_TIER));
+                return ItemInteractionResult.CONSUME;
+            }
+            be.setUpgradeTier(be.getUpgradeTier() + 1);
+            if (!player.getAbilities().instabuild) stack.shrink(1);
+            level.playSound(null, pos, SoundEvents.ANVIL_USE, SoundSource.BLOCKS, 1.0f, 1.2f);
+            player.sendSystemMessage(Component.literal("Upgrade tier: " + be.getUpgradeTier() + "/" + UpgradeTier.MAX_TIER));
+            return ItemInteractionResult.CONSUME;
+        }
+
+        // Empty hand: remove upgrade (shift) or cycle role / toggle enable
         if (stack.isEmpty()) {
             if (player.isShiftKeyDown()) {
+                if (be.getUpgradeTier() > 0) {
+                    be.setUpgradeTier(be.getUpgradeTier() - 1);
+                    ItemStack give = new ItemStack(QuickLinkNeoForge.UPGRADE_ITEM.get());
+                    if (!player.getInventory().add(give)) {
+                        Block.popResource(level, pos, give);
+                    }
+                    level.playSound(null, pos, SoundEvents.ITEM_PICKUP, SoundSource.PLAYERS, 0.5f, 1.4f);
+                    player.sendSystemMessage(Component.literal("Upgrade removed. Tier: " + be.getUpgradeTier() + "/" + UpgradeTier.MAX_TIER));
+                    return ItemInteractionResult.CONSUME;
+                }
                 boolean toggled = be.toggleSideEnabled(face);
                 if (!toggled) {
                     player.sendSystemMessage(Component.literal("Side " + face + ": NONE"));
@@ -173,6 +201,9 @@ public class FluidPlugBlock extends BaseEntityBlock {
             tag.putIntArray(QuickLinkNbt.SIDE_COLORS, be.getSideColorsPacked());
             tag.putInt(QuickLinkNbt.COLORS, be.getColors(Direction.NORTH).pack());
             drop.set(DataComponents.CUSTOM_DATA, CustomData.of(tag));
+            if (be.getUpgradeTier() > 0) {
+                return List.of(drop, new ItemStack(QuickLinkNeoForge.UPGRADE_ITEM.get(), be.getUpgradeTier()));
+            }
         }
         return List.of(drop);
     }

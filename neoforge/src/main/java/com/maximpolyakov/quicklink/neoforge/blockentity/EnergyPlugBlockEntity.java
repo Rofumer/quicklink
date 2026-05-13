@@ -3,6 +3,7 @@ package com.maximpolyakov.quicklink.neoforge.blockentity;
 import com.maximpolyakov.quicklink.QuickLinkColors;
 import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
+import com.maximpolyakov.quicklink.neoforge.UpgradeTier;
 import com.maximpolyakov.quicklink.neoforge.config.QuickLinkConfig;
 import com.maximpolyakov.quicklink.neoforge.network.QuickLinkEnergyNetworkManager;
 import net.minecraft.core.BlockPos;
@@ -24,8 +25,9 @@ import java.util.List;
 
 public class EnergyPlugBlockEntity extends BlockEntity {
 
-    static int transferFE = QuickLinkConfig.ENERGY_TRANSFER_FE.get();
     static int period = QuickLinkConfig.ENERGY_TICK_PERIOD.get();
+
+    private int upgradeTier = 0;
 
     private int plugMask = 0;
     private int pointMask = 0;
@@ -51,6 +53,17 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     private static int bit(Direction d) { return 1 << d.get3DDataValue(); }
     private static int clampMask6(int m) { return m & 0b111111; }
     private static int dirIndex(Direction d) { return Math.max(0, Math.min(5, d.get3DDataValue())); }
+
+    public int getUpgradeTier() { return upgradeTier; }
+
+    public void setUpgradeTier(int tier) {
+        upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER, tier));
+        setChangedAndSync();
+    }
+
+    public int effectiveTransferFe() {
+        return QuickLinkConfig.ENERGY_TRANSFER_FE.get() * UpgradeTier.multiplier(upgradeTier);
+    }
 
     public QuickLinkColors getColors(Direction side) { return sideColors[dirIndex(side)]; }
 
@@ -210,7 +223,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
         for (Direction side : Direction.values()) {
             if (be.isPlugEnabled(side)) {
-                be.tryTransferOnce(sl, side, transferFE);
+                be.tryTransferOnce(sl, side, be.effectiveTransferFe());
             }
         }
     }
@@ -430,6 +443,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         tag.putInt("ql_point_mask", clampMask6(pointMask));
         tag.putInt("ql_disabled_mask", clampMask6(disabledMask));
         tag.putIntArray("ql_rr_side", rrIndexBySide);
+        tag.putInt(QuickLinkNbt.UPGRADE_TIER, upgradeTier);
     }
 
     @Override
@@ -463,6 +477,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
             rrIndexBySide[i] = (arr.length > i) ? Math.max(0, arr[i]) : 0;
         }
 
+        upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER,
+                tag.contains(QuickLinkNbt.UPGRADE_TIER, Tag.TAG_INT) ? tag.getInt(QuickLinkNbt.UPGRADE_TIER) : 0));
     }
 
     @Override

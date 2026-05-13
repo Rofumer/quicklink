@@ -1,6 +1,7 @@
 package com.maximpolyakov.quicklink.neoforge.blockentity;
 
 import com.maximpolyakov.quicklink.neoforge.config.QuickLinkConfig;
+import com.maximpolyakov.quicklink.neoforge.UpgradeTier;
 import com.maximpolyakov.quicklink.QuickLinkColors;
 import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
@@ -28,9 +29,10 @@ import java.util.List;
 public class ItemPlugBlockEntity extends BlockEntity {
 
     // ===== SPEED =====
-    //private static final int MOVE_BATCH = 8; // <<< скорость передачи
-    int moveBatch = QuickLinkConfig.ITEM_MOVE_BATCH.get();
     static int period = QuickLinkConfig.ITEM_TICK_PERIOD.get();
+
+    // ---- upgrade ----
+    private int upgradeTier = 0;
 
     // ---- per-side roles ----
     private int plugMask = 0;
@@ -68,6 +70,21 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
     private static int dirIndex(Direction d) {
         return Math.max(0, Math.min(5, d.get3DDataValue()));
+    }
+
+    // ------------------------------------------------
+    // upgrade tier
+    // ------------------------------------------------
+
+    public int getUpgradeTier() { return upgradeTier; }
+
+    public void setUpgradeTier(int tier) {
+        upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER, tier));
+        setChangedAndSync();
+    }
+
+    public int effectiveMoveBatch() {
+        return QuickLinkConfig.ITEM_MOVE_BATCH.get() * UpgradeTier.multiplier(upgradeTier);
     }
 
     // ------------------------------------------------
@@ -386,7 +403,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
             IItemHandler src = getAttachedItemHandler(s.lvl(), s.pos(), s.dir());
             if (src == null) continue;
 
-            int moved = moveItems(src, dst, moveBatch);
+            int moved = moveItems(src, dst, effectiveMoveBatch());
             if (moved > 0) {
                 rrIndexBySide[pIdx] = (idx + 1) % sources.size();
                 setChanged();
@@ -596,6 +613,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
         tag.putInt("ql_point_mask", clampMask6(pointMask));
         tag.putInt("ql_disabled_mask", clampMask6(disabledMask));
         tag.putIntArray("ql_rr_side", rrIndexBySide);
+        tag.putInt(QuickLinkNbt.UPGRADE_TIER, upgradeTier);
     }
 
     @Override
@@ -628,6 +646,9 @@ public class ItemPlugBlockEntity extends BlockEntity {
         for (int i = 0; i < 6; i++) {
             rrIndexBySide[i] = (arr.length > i) ? Math.max(0, arr[i]) : 0;
         }
+
+        upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER,
+                tag.contains(QuickLinkNbt.UPGRADE_TIER, Tag.TAG_INT) ? tag.getInt(QuickLinkNbt.UPGRADE_TIER) : 0));
     }
 
     @Override

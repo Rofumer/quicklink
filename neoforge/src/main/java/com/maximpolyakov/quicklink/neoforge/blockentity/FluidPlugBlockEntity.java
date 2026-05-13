@@ -1,6 +1,7 @@
 package com.maximpolyakov.quicklink.neoforge.blockentity;
 
 import com.maximpolyakov.quicklink.neoforge.config.QuickLinkConfig;
+import com.maximpolyakov.quicklink.neoforge.UpgradeTier;
 import com.maximpolyakov.quicklink.QuickLinkColors;
 import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
@@ -31,15 +32,12 @@ import net.neoforged.neoforge.fluids.capability.IFluidHandler;
 public class FluidPlugBlockEntity extends BlockEntity {
 
     // ==== transfer tuning ====
-    // фиксированный объём за попытку (mB)
-    //public static final int TRANSFER_MB = 250; // 250 / 500 / 1000
-    // попытка раз в N тиков
-    //public static final int TICK_PERIOD = 10;
-    static int amountMB = QuickLinkConfig.FLUID_TRANSFER_MB.get();
     static int period = QuickLinkConfig.FLUID_TICK_PERIOD.get();
-    // отладка трансфера (включи если снова "ничего не происходит")
     private static final boolean DBG_TRANSFER = false;
     // =========================
+
+    // ---- upgrade ----
+    private int upgradeTier = 0;
 
     // ---- per-side roles ----
     // masks by Direction.get3DDataValue():
@@ -90,6 +88,27 @@ public class FluidPlugBlockEntity extends BlockEntity {
         if (idx < 0) idx = 0;
         if (idx > 5) idx = 5;
         return idx;
+    }
+
+    // ---------------- upgrade tier ----------------
+
+    public int getUpgradeTier() { return upgradeTier; }
+
+    public void setUpgradeTier(int tier) {
+        upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER, tier));
+        setChangedAndSync();
+    }
+
+    public int effectiveAmountMb() {
+        return QuickLinkConfig.FLUID_TRANSFER_MB.get() * UpgradeTier.multiplier(upgradeTier);
+    }
+
+    public long effectiveInfiniteMbPerTick() {
+        return (long) QuickLinkConfig.FLUID_INFINITE_MB_PER_TICK.get() * UpgradeTier.multiplier(upgradeTier);
+    }
+
+    public int effectiveInfiniteMaxPush() {
+        return QuickLinkConfig.FLUID_INFINITE_MAX_PUSH_PER_TICK.get() * UpgradeTier.multiplier(upgradeTier);
     }
 
     // ---------------- public API (block/use) ----------------
@@ -335,7 +354,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
         // try for each enabled PLUG side
         for (Direction plugSide : Direction.values()) {
             if (be.isPlugEnabled(plugSide)) {
-                be.tryTransferOnce(sl, plugSide, amountMB);
+                be.tryTransferOnce(sl, plugSide, be.effectiveAmountMb());
             }
         }
     }
@@ -504,8 +523,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
     private static boolean pushInfiniteWater(List<IFluidHandler> dsts, FluidPlugBlockEntity plugBe, Direction pointSide) {
         int idx = dirIndex(pointSide);
 
-        long rateMb = QuickLinkConfig.FLUID_INFINITE_MB_PER_TICK.get();
-        int maxChunk = QuickLinkConfig.FLUID_INFINITE_MAX_PUSH_PER_TICK.get();
+        long rateMb = plugBe.effectiveInfiniteMbPerTick();
+        int maxChunk = plugBe.effectiveInfiniteMaxPush();
 
         plugBe.waterAccumBySide[idx] += rateMb;
 
@@ -716,6 +735,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
         tag.putIntArray("ql_rr_side", rrIndexBySide);
         tag.putLongArray("ql_inf_water_accum", waterAccumBySide);
+        tag.putInt(QuickLinkNbt.UPGRADE_TIER, upgradeTier);
     }
 
     @Override
@@ -763,5 +783,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
         // keep infinite-water only on POINT sides
         infiniteWaterMask &= pointMask;
+
+        upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER,
+                tag.contains(QuickLinkNbt.UPGRADE_TIER, Tag.TAG_INT) ? tag.getInt(QuickLinkNbt.UPGRADE_TIER) : 0));
     }
 }
