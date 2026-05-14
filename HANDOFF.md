@@ -20,39 +20,24 @@
 
 ---
 
-## Open Bug: HUD Overlay Not Showing
+## HUD Overlay — FIXED
 
-**What it should do:** When the player looks at an item/fluid/energy plug block, text like `"Upgrade: none"` or `"Upgrade: tier 2 / 4 (×4)"` appears centered slightly below the crosshair.
+**Root cause (found via bytecode decompile):**  
+`GuiGraphicsExtractor.text()` in MC 26.x checks `ARGB.alpha(color) == 0` and immediately returns without rendering.  
+Colors like `0xAAAAAA` and `0xFFD700` are 24-bit RGB — in 32-bit ARGB their alpha byte is **0x00**, so all draws were silently discarded.
 
-**What's confirmed working:**
-- `RegisterGuiLayersEvent` fires (no errors in log)
-- `GuiLayer.render()` IS being called — confirmed via `LOGGER.info` during debug run
-- `mc.level.getBlockEntity(pos)` returns the correct `ItemPlugBlockEntity` instance
-- `getUpgradeTier()` returns 0 correctly
-- `gui.text(mc.font, text, x, y, color, true)` is called with correct args
-
-**What's NOT working:**
-- Text never appears on screen despite the above
-
-**Current code:** `QuickLinkHudOverlay.java` — `GuiLayer LAYER = QuickLinkHudOverlay::render`  
-Registered in `NeoForgeClientEvents.registerGuiLayers` via `event.registerAboveAll(...)`.
-
-**Hypothesis (not yet verified):**  
-`GuiGraphicsExtractor.text()` in MC 26.x may require being inside a `GuiRenderState` batch that's active at layer render time. The `render(GuiGraphicsExtractor, DeltaTracker)` call might need to use `GuiRenderState` directly, or use `Font.drawInBatch()` with a `MultiBufferSource`, or use a different API.
-
-**Things to investigate:**
-1. Decompile `GuiGraphicsExtractor.text()` and trace what `GuiRenderState` it submits to — is there a `flush()` needed?
-2. Look at how NeoForge's own HUD layers (crosshair, hotbar, etc.) render text — `VanillaGuiLayers` references.
-3. Check if `RegisterGuiLayersEvent` in NeoForge 26.x actually passes a valid render-ready `GuiGraphicsExtractor` or a stub.
-4. Maybe MC 26.x text rendering needs explicit push/pop matrix scope.
-
-**JAR paths for API inspection:**
+**Fix:** Prepend `0xFF` alpha byte to all colors passed to `gui.text()`:
+```java
+// Before (broken — alpha=0):
+int color = tier == 0 ? 0xAAAAAA : 0xFFD700;
+// After (fixed — alpha=0xFF):
+int color = tier == 0 ? 0xFFAAAAAA : 0xFFFFD700;
 ```
-MC client:  %USERPROFILE%\.gradle\caches\neoformruntime\artifacts\minecraft_26.1.2_client.jar
-NeoForge:   %USERPROFILE%\.gradle\caches\modules-2\files-2.1\net.neoforged\neoforge\26.1.2.48-beta\bcf92260d56dc7345c83a4d8e795e80282bb5b86\neoforge-26.1.2.48-beta-universal.jar
-FML loader: %USERPROFILE%\.gradle\caches\modules-2\files-2.1\net.neoforged.fancymodloader\loader\11.0.13\c9c89eaf35535990110088224d188748d81eaecf\loader-11.0.13.jar
-```
-Use `jar xf <jar> <class>` then `javap -p <class>` to inspect APIs.
+
+**Architecture confirmed via decompile:**  
+- `Gui.extractRenderState()` calls `layerManager.render(gui, delta)` — our `GuiLayer` is called correctly  
+- `gui.text()` submits to retained-mode `GuiRenderState` buffer — no flush needed, works same as vanilla layers  
+- `registerAboveAll` correctly places our layer last in the list
 
 ---
 

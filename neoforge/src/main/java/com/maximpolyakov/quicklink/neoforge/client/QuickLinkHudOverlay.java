@@ -40,7 +40,7 @@ public final class QuickLinkHudOverlay {
         int x = w / 2 - mc.font.width(text) / 2;
         int y = h / 2 + 20;
 
-        int color = tier == 0 ? 0xAAAAAA : 0xFFD700;
+        int color = tier == 0 ? 0xFFAAAAAA : 0xFFFFD700;
         gui.text(mc.font, text, x, y, color, true);
     }
 }
