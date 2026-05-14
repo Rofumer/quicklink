@@ -50,7 +50,12 @@ neoForge {
     }
 }
 
+tasks.withType(AbstractCopyTask).configureEach {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
 processResources {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     inputs.property 'version', project.version
 
     filesMatching('META-INF/neoforge.mods.toml') {

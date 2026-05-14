@@ -6,9 +6,10 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.item.component.TooltipDisplay;
 import net.minecraft.world.level.block.Block;
 
-import java.util.List;
+import java.util.function.Consumer;
 
 public class QuickLinkPlugBlockItem extends BlockItem {
 
@@ -17,9 +18,10 @@ public class QuickLinkPlugBlockItem extends BlockItem {
     }
 
     @Override
-    public void appendHoverText(ItemStack stack, Item.TooltipContext ctx, List<Component> tips, TooltipFlag flag) {
-        super.appendHoverText(stack, ctx, tips, flag);
-        tips.add(Component.translatable("tooltip." + getDescriptionId() + ".1").withStyle(ChatFormatting.GRAY));
-        tips.add(Component.translatable("tooltip.quicklink.plug.use").withStyle(ChatFormatting.DARK_GRAY));
+    public void appendHoverText(ItemStack stack, Item.TooltipContext ctx, TooltipDisplay display,
+                                Consumer<Component> tooltipAdder, TooltipFlag flag) {
+        super.appendHoverText(stack, ctx, display, tooltipAdder, flag);
+        tooltipAdder.accept(Component.translatable("tooltip." + getDescriptionId() + ".1").withStyle(ChatFormatting.GRAY));
+        tooltipAdder.accept(Component.translatable("tooltip.quicklink.plug.use").withStyle(ChatFormatting.DARK_GRAY));
     }
 }

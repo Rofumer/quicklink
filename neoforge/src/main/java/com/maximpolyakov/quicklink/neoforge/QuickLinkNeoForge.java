@@ -19,7 +19,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.neoforged.bus.api.IEventBus;
-import net.neoforged.fml.ModLoadingContext;
+import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
@@ -49,7 +49,7 @@ public final class QuickLinkNeoForge {
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<ItemPlugBlockEntity>> ITEM_PLUG_BE =
             BLOCK_ENTITIES.register("item_plug",
-                    () -> BlockEntityType.Builder.of(ItemPlugBlockEntity::new, ITEM_PLUG.get()).build(null));
+                    () -> new BlockEntityType<>(ItemPlugBlockEntity::new, ITEM_PLUG.get()));
 
     public static final DeferredHolder<Block, FluidPlugBlock> FLUID_PLUG_BLOCK = BLOCKS.register(
             "fluid_plug",
@@ -63,10 +63,7 @@ public final class QuickLinkNeoForge {
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<FluidPlugBlockEntity>> FLUID_PLUG_BE =
             BLOCK_ENTITIES.register("fluid_plug",
-                    () -> BlockEntityType.Builder
-                            .of(FluidPlugBlockEntity::new, FLUID_PLUG_BLOCK.get())
-                            .build(null)
-            );
+                    () -> new BlockEntityType<>(FluidPlugBlockEntity::new, FLUID_PLUG_BLOCK.get()));
 
     public static final DeferredHolder<Item, Item> UPGRADE_ITEM =
             ITEMS.register("quicklink_upgrade", () -> new QuickLinkUpgradeItem(new Item.Properties().stacksTo(64)));
@@ -83,18 +80,14 @@ public final class QuickLinkNeoForge {
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<EnergyPlugBlockEntity>> ENERGY_PLUG_BE =
             BLOCK_ENTITIES.register("energy_plug",
-                    () -> BlockEntityType.Builder
-                            .of(EnergyPlugBlockEntity::new, ENERGY_PLUG_BLOCK.get())
-                            .build(null)
-            );
+                    () -> new BlockEntityType<>(EnergyPlugBlockEntity::new, ENERGY_PLUG_BLOCK.get()));
 
 
-    public QuickLinkNeoForge() {
+    public QuickLinkNeoForge(IEventBus modBus, ModContainer container) {
         QuickLink.init();
 
-        ModLoadingContext.get().getActiveContainer().registerConfig(ModConfig.Type.COMMON, QuickLinkConfig.SPEC);
+        container.registerConfig(ModConfig.Type.COMMON, QuickLinkConfig.SPEC);
 
-        IEventBus modBus = ModLoadingContext.get().getActiveContainer().getEventBus();
         BLOCKS.register(modBus);
         ITEMS.register(modBus);
         BLOCK_ENTITIES.register(modBus);
@@ -104,11 +97,11 @@ public final class QuickLinkNeoForge {
     }
 
     private void registerCapabilities(RegisterCapabilitiesEvent event) {
-        event.registerBlockEntity(Capabilities.ItemHandler.BLOCK, ITEM_PLUG_BE.get(),
+        event.registerBlockEntity(Capabilities.Item.BLOCK, ITEM_PLUG_BE.get(),
                 (be, side) -> be.getExternalItemHandler(side));
-        event.registerBlockEntity(Capabilities.FluidHandler.BLOCK, FLUID_PLUG_BE.get(),
+        event.registerBlockEntity(Capabilities.Fluid.BLOCK, FLUID_PLUG_BE.get(),
                 (be, side) -> be.getExternalFluidHandler(side));
-        event.registerBlockEntity(Capabilities.EnergyStorage.BLOCK, ENERGY_PLUG_BE.get(),
+        event.registerBlockEntity(Capabilities.Energy.BLOCK, ENERGY_PLUG_BE.get(),
                 (be, side) -> be.getExternalEnergyStorage(side));
     }
 

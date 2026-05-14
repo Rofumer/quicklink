@@ -14,10 +14,11 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.world.ItemInteractionResult;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.DyeItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
@@ -77,26 +78,26 @@ public class ItemPlugBlock extends BaseEntityBlock {
     @Nullable
     @Override
     public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
-        if (level.isClientSide) return null;
+        if (level.isClientSide()) return null;
         return createTickerHelper(type, QuickLinkNeoForge.ITEM_PLUG_BE.get(), ItemPlugBlockEntity::serverTick);
     }
 
     @Override
-    public ItemInteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos,
-                                           Player player, InteractionHand hand, BlockHitResult hit) {
+    protected InteractionResult useItemOn(ItemStack stack, BlockState state, Level level, BlockPos pos,
+                                          Player player, InteractionHand hand, BlockHitResult hit) {
 
         // client: optimistic success for interactions we handle (server applies real change)
-        if (level.isClientSide) {
+        if (level.isClientSide()) {
             if (stack.getItem() instanceof DyeItem || stack.isEmpty()
                     || stack.getItem() instanceof QuickLinkUpgradeItem) {
-                return ItemInteractionResult.SUCCESS;
+                return InteractionResult.SUCCESS;
             }
-            return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
+            return InteractionResult.TRY_WITH_EMPTY_HAND;
         }
 
         BlockEntity be0 = level.getBlockEntity(pos);
         if (!(be0 instanceof ItemPlugBlockEntity be)) {
-            return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
+            return InteractionResult.TRY_WITH_EMPTY_HAND;
         }
 
         Direction face = hit.getDirection();
@@ -105,13 +106,13 @@ public class ItemPlugBlock extends BaseEntityBlock {
         if (stack.getItem() instanceof QuickLinkUpgradeItem) {
             if (be.getUpgradeTier() >= UpgradeTier.MAX_TIER) {
                 player.sendSystemMessage(Component.literal("Already at max tier " + UpgradeTier.MAX_TIER));
-                return ItemInteractionResult.CONSUME;
+                return InteractionResult.CONSUME;
             }
             be.setUpgradeTier(be.getUpgradeTier() + 1);
             if (!player.getAbilities().instabuild) stack.shrink(1);
             level.playSound(null, pos, SoundEvents.ANVIL_USE, SoundSource.BLOCKS, 1.0f, 1.2f);
             player.sendSystemMessage(Component.literal("Upgrade tier: " + be.getUpgradeTier() + "/" + UpgradeTier.MAX_TIER));
-            return ItemInteractionResult.CONSUME;
+            return InteractionResult.CONSUME;
         }
 
         // 2) Empty hand: remove upgrade (shift) or cycle role / toggle enable
@@ -125,7 +126,7 @@ public class ItemPlugBlock extends BaseEntityBlock {
                     }
                     level.playSound(null, pos, SoundEvents.ITEM_PICKUP, SoundSource.PLAYERS, 0.5f, 1.4f);
                     player.sendSystemMessage(Component.literal("Upgrade removed. Tier: " + be.getUpgradeTier() + "/" + UpgradeTier.MAX_TIER));
-                    return ItemInteractionResult.CONSUME;
+                    return InteractionResult.CONSUME;
                 }
                 boolean toggled = be.toggleSideEnabled(face);
                 if (!toggled) {
@@ -140,13 +141,15 @@ public class ItemPlugBlock extends BaseEntityBlock {
                 boolean on = (role != ItemPlugBlockEntity.SideRole.NONE) && be.isSideEnabled(face);
                 player.sendSystemMessage(Component.literal("Side " + face + ": " + role + (role == ItemPlugBlockEntity.SideRole.NONE ? "" : (" (" + (on ? "ON" : "OFF") + ")"))));
             }
-            return ItemInteractionResult.CONSUME;
+            return InteractionResult.CONSUME;
         }
 
         // 3) Dye: paint quadrant on clicked face (network colors)
-        if (!(stack.getItem() instanceof DyeItem dye)) {
-            return ItemInteractionResult.PASS_TO_DEFAULT_BLOCK_INTERACTION;
+        if (!(stack.getItem() instanceof DyeItem)) {
+            return InteractionResult.TRY_WITH_EMPTY_HAND;
         }
+        DyeColor dyeColor = stack.get(DataComponents.DYE);
+        if (dyeColor == null) return InteractionResult.TRY_WITH_EMPTY_HAND;
 
         // Local hit coords in [0..1)
         double lx = hit.getLocation().x - pos.getX();
@@ -154,19 +157,19 @@ public class ItemPlugBlock extends BaseEntityBlock {
         double lz = hit.getLocation().z - pos.getZ();
 
         int slot = quadSlotFromHit(face, lx, ly, lz);
-        byte colorId = (byte) dye.getDyeColor().getId(); // 0..15
+        byte colorId = (byte) dyeColor.getId(); // 0..15
         be.setColor(face, slot, colorId);
 
         // Optional: consume dye in survival
         // if (!player.getAbilities().instabuild) stack.shrink(1);
 
-        return ItemInteractionResult.CONSUME;
+        return InteractionResult.CONSUME;
     }
 
     @Override
     public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {
         super.setPlacedBy(level, pos, state, placer, stack);
-        if (level.isClientSide) return;
+        if (level.isClientSide()) return;
 
         BlockEntity be0 = level.getBlockEntity(pos);
         if (!(be0 instanceof ItemPlugBlockEntity be)) return;
@@ -176,9 +179,9 @@ public class ItemPlugBlock extends BaseEntityBlock {
 
         CompoundTag tag = customData.copyTag();
         if (tag.contains(QuickLinkNbt.SIDE_COLORS)) {
-            be.setSideColorsPacked(tag.getIntArray(QuickLinkNbt.SIDE_COLORS));
+            be.setSideColorsPacked(tag.getIntArray(QuickLinkNbt.SIDE_COLORS).orElse(new int[0]));
         } else if (tag.contains(QuickLinkNbt.COLORS)) {
-            be.setColors(QuickLinkColors.unpack(tag.getInt(QuickLinkNbt.COLORS)));
+            be.setColors(QuickLinkColors.unpack(tag.getIntOr(QuickLinkNbt.COLORS, 0)));
         }
     }
 

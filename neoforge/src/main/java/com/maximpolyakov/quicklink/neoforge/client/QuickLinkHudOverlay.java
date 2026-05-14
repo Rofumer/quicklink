@@ -14,7 +14,7 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.fml.common.EventBusSubscriber;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 
-@EventBusSubscriber(modid = QuickLink.MOD_ID, bus = EventBusSubscriber.Bus.GAME, value = Dist.CLIENT)
+@EventBusSubscriber(modid = QuickLink.MOD_ID, value = Dist.CLIENT)
 public final class QuickLinkHudOverlay {
 
     @SubscribeEvent
@@ -44,6 +44,6 @@ public final class QuickLinkHudOverlay {
         int y = h / 2 + 20;
 
         int color = tier == 0 ? 0xAAAAAA : 0xFFD700;
-        event.getGuiGraphics().drawString(mc.font, text, x, y, color, true);
+        event.getGuiGraphics().text(mc.font, text, x, y, color, true);
     }
 }

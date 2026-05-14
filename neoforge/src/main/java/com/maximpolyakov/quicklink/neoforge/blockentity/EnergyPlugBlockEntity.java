@@ -10,14 +10,17 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.Tag;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
 import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.energy.IEnergyStorage;
+import net.neoforged.neoforge.transfer.energy.EnergyHandler;
+import net.neoforged.neoforge.transfer.transaction.Transaction;
+import net.neoforged.neoforge.transfer.transaction.TransactionContext;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -39,13 +42,13 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
     private java.util.Set<Integer> lastRegPlugKeys = new java.util.HashSet<>();
     private java.util.Set<Integer> lastRegPointKeys = new java.util.HashSet<>();
-    private final IEnergyStorage[] sideCapabilities = new IEnergyStorage[6];
+    private final EnergyHandler[] sideCapabilities = new EnergyHandler[6];
 
     public EnergyPlugBlockEntity(BlockPos pos, BlockState state) {
         super(QuickLinkNeoForge.ENERGY_PLUG_BE.get(), pos, state);
         for (Direction side : Direction.values()) {
             int idx = dirIndex(side);
-            sideCapabilities[idx] = new SideEnergyStorage(this, side);
+            sideCapabilities[idx] = new SideEnergyHandler(this, side);
             sideColors[idx] = QuickLinkColors.unset();
         }
     }
@@ -106,12 +109,13 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         boolean plug = (plugMask & b) != 0;
         boolean point = (pointMask & b) != 0;
         if (plug && point) return SideRole.BOTH;
-        if ((plugMask & b) != 0) return SideRole.PLUG;
-        if ((pointMask & b) != 0) return SideRole.POINT;
+        if (plug) return SideRole.PLUG;
+        if (point) return SideRole.POINT;
         return SideRole.NONE;
     }
 
     public boolean isSideEnabled(Direction side) { return (disabledMask & bit(side)) == 0; }
+
     public boolean isPlugEnabled(Direction side) {
         SideRole role = getRole(side);
         return (role == SideRole.PLUG || role == SideRole.BOTH) && isSideEnabled(side);
@@ -137,10 +141,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
         if (next == SideRole.PLUG) plugMask |= b;
         if (next == SideRole.POINT) pointMask |= b;
-        if (next == SideRole.BOTH) {
-            plugMask |= b;
-            pointMask |= b;
-        }
+        if (next == SideRole.BOTH) { plugMask |= b; pointMask |= b; }
         if (next == SideRole.NONE) disabledMask &= ~b;
 
         plugMask = clampMask6(plugMask);
@@ -163,7 +164,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
     private void setChangedAndSync() {
         setChanged();
-        if (level != null && !level.isClientSide) {
+        if (level != null && !level.isClientSide()) {
             level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
         }
     }
@@ -171,17 +172,14 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     @Override
     public void onLoad() {
         super.onLoad();
-        if (level != null && !level.isClientSide) syncRegistration();
+        if (level != null && !level.isClientSide()) syncRegistration();
     }
 
     @Override
     public void setRemoved() {
-        if (level != null && !level.isClientSide) unregisterFromManager();
+        if (level != null && !level.isClientSide()) unregisterFromManager();
         super.setRemoved();
     }
-
-    private boolean hasAnyEffectivePlug() { return (plugMask & ~disabledMask) != 0; }
-    private boolean hasAnyEffectivePoint() { return (pointMask & ~disabledMask) != 0; }
 
     private void unregisterFromManager() {
         if (!(level instanceof ServerLevel sl)) return;
@@ -229,14 +227,14 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     }
 
     @Nullable
-    public IEnergyStorage getExternalEnergyStorage(@Nullable Direction side) {
+    public EnergyHandler getExternalEnergyStorage(@Nullable Direction side) {
         if (side == null) return null;
         if (!isSideEnabled(side)) return null;
         if (getRole(side) == SideRole.NONE) return null;
         return sideCapabilities[dirIndex(side)];
     }
 
-    private int receiveIntoNetwork(Direction inputSide, int amount, boolean simulate) {
+    int receiveIntoNetwork(Direction inputSide, int amount, TransactionContext ctx) {
         if (amount <= 0 || !isPointEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
 
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
@@ -259,19 +257,17 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
             for (Direction plugSide : Direction.values()) {
                 if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
-                IEnergyStorage dst = getAttachedEnergyStorage(plugLevel, ref.pos(), plugSide);
-                if (dst == null || !dst.canReceive()) continue;
+                EnergyHandler dst = getAttachedEnergyStorage(plugLevel, ref.pos(), plugSide);
+                if (dst == null) continue;
 
-                int accepted = dst.receiveEnergy(left, simulate);
+                int accepted = dst.insert(left, ctx);
                 if (accepted <= 0) continue;
 
                 moved += accepted;
                 left -= accepted;
 
-                if (!simulate) {
-                    rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % plugs.size();
-                    setChanged();
-                }
+                rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % plugs.size();
+                setChanged();
 
                 if (left <= 0) break;
             }
@@ -280,7 +276,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         return moved;
     }
 
-    private int extractFromNetwork(Direction outputSide, int amount, boolean simulate) {
+    int extractFromNetwork(Direction outputSide, int amount, TransactionContext ctx) {
         if (amount <= 0 || !isPlugEnabled(outputSide) || !(level instanceof ServerLevel sl)) return 0;
 
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
@@ -304,19 +300,17 @@ public class EnergyPlugBlockEntity extends BlockEntity {
             for (Direction pointSide : Direction.values()) {
                 if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
 
-                IEnergyStorage src = getAttachedEnergyStorage(pointLevel, ref.pos(), pointSide);
-                if (src == null || !src.canExtract()) continue;
+                EnergyHandler src = getAttachedEnergyStorage(pointLevel, ref.pos(), pointSide);
+                if (src == null) continue;
 
-                int extracted = src.extractEnergy(left, simulate);
+                int extracted = src.extract(left, ctx);
                 if (extracted <= 0) continue;
 
                 moved += extracted;
                 left -= extracted;
 
-                if (!simulate) {
-                    rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % points.size();
-                    setChanged();
-                }
+                rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % points.size();
+                setChanged();
 
                 if (left <= 0) break;
             }
@@ -326,7 +320,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     }
 
     private void tryTransferOnce(ServerLevel sl, Direction plugSide, int amountFE) {
-        IEnergyStorage dst = getAttachedEnergyStorage(sl, worldPosition, plugSide);
+        EnergyHandler dst = getAttachedEnergyStorage(sl, worldPosition, plugSide);
         if (dst == null) return;
 
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
@@ -352,7 +346,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         for (int i = 0; i < sources.size(); i++) {
             int idx = (start + i) % sources.size();
             Src s = sources.get(idx);
-            IEnergyStorage src = getAttachedEnergyStorage(s.lvl(), s.pos(), s.dir());
+            EnergyHandler src = getAttachedEnergyStorage(s.lvl(), s.pos(), s.dir());
             if (src == null) continue;
 
             if (moveEnergy(src, dst, amountFE)) {
@@ -367,125 +361,105 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     }
 
     @Nullable
-    private static IEnergyStorage getAttachedEnergyStorage(ServerLevel level, BlockPos selfPos, Direction side) {
+    private static EnergyHandler getAttachedEnergyStorage(ServerLevel level, BlockPos selfPos, Direction side) {
         BlockPos target = selfPos.relative(side);
         Direction targetFaceTowardUs = side.getOpposite();
-        return level.getCapability(Capabilities.EnergyStorage.BLOCK, target, targetFaceTowardUs);
+        return level.getCapability(Capabilities.Energy.BLOCK, target, targetFaceTowardUs);
     }
 
-    private static boolean moveEnergy(IEnergyStorage src, IEnergyStorage dst, int amountFE) {
-        if (amountFE <= 0 || !src.canExtract() || !dst.canReceive()) return false;
-
-        int canExtract = src.extractEnergy(amountFE, true);
-        if (canExtract <= 0) return false;
-
-        int canReceive = dst.receiveEnergy(canExtract, true);
-        if (canReceive <= 0) return false;
-
-        int toMove = Math.min(canExtract, canReceive);
-        if (toMove <= 0) return false;
-
-        int extracted = src.extractEnergy(toMove, false);
-        if (extracted <= 0) return false;
-
-        int received = dst.receiveEnergy(extracted, false);
-        return received > 0;
+    private static boolean moveEnergy(EnergyHandler src, EnergyHandler dst, int amountFE) {
+        if (amountFE <= 0) return false;
+        try (var tx = Transaction.openRoot()) {
+            int canReceive = dst.insert(amountFE, tx);
+            if (canReceive <= 0) return false;
+            int extracted = src.extract(canReceive, tx);
+            if (extracted <= 0) return false;
+            tx.commit();
+            return true;
+        }
     }
 
-    private static final class SideEnergyStorage implements IEnergyStorage {
+    private static final class SideEnergyHandler implements EnergyHandler {
         private final EnergyPlugBlockEntity owner;
         private final Direction side;
 
-        private SideEnergyStorage(EnergyPlugBlockEntity owner, Direction side) {
+        private SideEnergyHandler(EnergyPlugBlockEntity owner, Direction side) {
             this.owner = owner;
             this.side = side;
         }
 
         @Override
-        public int receiveEnergy(int maxReceive, boolean simulate) {
-            return owner.receiveIntoNetwork(side, maxReceive, simulate);
+        public int insert(int maxAmount, TransactionContext ctx) {
+            if (maxAmount <= 0 || !owner.isPointEnabled(side)) return 0;
+            return owner.receiveIntoNetwork(side, maxAmount, ctx);
         }
 
         @Override
-        public int extractEnergy(int maxExtract, boolean simulate) {
-            return owner.extractFromNetwork(side, maxExtract, simulate);
+        public int extract(int maxAmount, TransactionContext ctx) {
+            if (maxAmount <= 0 || !owner.isPlugEnabled(side)) return 0;
+            return owner.extractFromNetwork(side, maxAmount, ctx);
         }
 
         @Override
-        public int getEnergyStored() {
-            return 0;
+        public long getAmountAsLong() {
+            return 0L;
         }
 
         @Override
-        public int getMaxEnergyStored() {
+        public long getCapacityAsLong() {
             return Integer.MAX_VALUE;
         }
-
-        @Override
-        public boolean canExtract() {
-            return owner.isPlugEnabled(side);
-        }
-
-        @Override
-        public boolean canReceive() {
-            return owner.isPointEnabled(side);
-        }
     }
 
     @Override
-    protected void saveAdditional(CompoundTag tag, HolderLookup.Provider registries) {
-        super.saveAdditional(tag, registries);
-        tag.putIntArray(QuickLinkNbt.SIDE_COLORS, getSideColorsPacked());
-        tag.putInt(QuickLinkNbt.COLORS, sideColors[0].pack());
-        tag.putBoolean(QuickLinkNbt.ENABLED, enabled);
-        tag.putInt("ql_schema", 1);
-        tag.putInt("ql_plug_mask", clampMask6(plugMask));
-        tag.putInt("ql_point_mask", clampMask6(pointMask));
-        tag.putInt("ql_disabled_mask", clampMask6(disabledMask));
-        tag.putIntArray("ql_rr_side", rrIndexBySide);
-        tag.putInt(QuickLinkNbt.UPGRADE_TIER, upgradeTier);
+    protected void saveAdditional(ValueOutput output) {
+        super.saveAdditional(output);
+        output.putIntArray(QuickLinkNbt.SIDE_COLORS, getSideColorsPacked());
+        output.putInt(QuickLinkNbt.COLORS, sideColors[0].pack());
+        output.putBoolean(QuickLinkNbt.ENABLED, enabled);
+        output.putInt("ql_schema", 1);
+        output.putInt("ql_plug_mask", clampMask6(plugMask));
+        output.putInt("ql_point_mask", clampMask6(pointMask));
+        output.putInt("ql_disabled_mask", clampMask6(disabledMask));
+        output.putIntArray("ql_rr_side", rrIndexBySide);
+        output.putInt(QuickLinkNbt.UPGRADE_TIER, upgradeTier);
     }
 
     @Override
-    public void loadAdditional(CompoundTag tag, HolderLookup.Provider registries) {
-        super.loadAdditional(tag, registries);
+    protected void loadAdditional(ValueInput input) {
+        super.loadAdditional(input);
 
-        if (tag.contains(QuickLinkNbt.SIDE_COLORS, Tag.TAG_INT_ARRAY)) {
-            int[] packed = tag.getIntArray(QuickLinkNbt.SIDE_COLORS);
+        int[] sideColorsPacked = input.getIntArray(QuickLinkNbt.SIDE_COLORS).orElse(null);
+        if (sideColorsPacked != null) {
             for (int i = 0; i < 6; i++) {
-                int v = (packed.length > i) ? packed[i] : QuickLinkColors.unset().pack();
+                int v = (sideColorsPacked.length > i) ? sideColorsPacked[i] : QuickLinkColors.unset().pack();
                 sideColors[i] = QuickLinkColors.unpack(v);
             }
         } else {
-            int packed = tag.contains(QuickLinkNbt.COLORS, Tag.TAG_INT)
-                    ? tag.getInt(QuickLinkNbt.COLORS)
-                    : QuickLinkColors.unset().pack();
-            QuickLinkColors legacy = QuickLinkColors.unpack(packed);
+            QuickLinkColors legacy = QuickLinkColors.unpack(input.getIntOr(QuickLinkNbt.COLORS, QuickLinkColors.unset().pack()));
             for (int i = 0; i < 6; i++) sideColors[i] = legacy;
         }
-        enabled = !tag.contains(QuickLinkNbt.ENABLED, Tag.TAG_BYTE) || tag.getBoolean(QuickLinkNbt.ENABLED);
 
-        plugMask = clampMask6(tag.getInt("ql_plug_mask"));
-        pointMask = clampMask6(tag.getInt("ql_point_mask"));
-        if (!tag.contains("ql_schema")) {
+        enabled = input.getBooleanOr(QuickLinkNbt.ENABLED, true);
+
+        plugMask = clampMask6(input.getIntOr("ql_plug_mask", 0));
+        pointMask = clampMask6(input.getIntOr("ql_point_mask", 0));
+        if (input.getIntOr("ql_schema", -1) < 0) {
             int tmp = plugMask; plugMask = pointMask; pointMask = tmp;
         }
-        disabledMask = clampMask6(tag.getInt("ql_disabled_mask"));
+        disabledMask = clampMask6(input.getIntOr("ql_disabled_mask", 0));
 
-        int[] arr = tag.getIntArray("ql_rr_side");
+        int[] arr = input.getIntArray("ql_rr_side").orElse(new int[0]);
         for (int i = 0; i < 6; i++) {
             rrIndexBySide[i] = (arr.length > i) ? Math.max(0, arr[i]) : 0;
         }
 
-        upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER,
-                tag.contains(QuickLinkNbt.UPGRADE_TIER, Tag.TAG_INT) ? tag.getInt(QuickLinkNbt.UPGRADE_TIER) : 0));
+        upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER, input.getIntOr(QuickLinkNbt.UPGRADE_TIER, 0)));
     }
 
     @Override
     public CompoundTag getUpdateTag(HolderLookup.Provider registries) {
-        CompoundTag tag = super.getUpdateTag(registries);
-        saveAdditional(tag, registries);
-        return tag;
+        return this.saveCustomOnly(registries);
     }
 
     @Nullable
