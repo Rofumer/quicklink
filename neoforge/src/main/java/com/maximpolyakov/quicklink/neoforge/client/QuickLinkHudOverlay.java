@@ -1,24 +1,21 @@
 package com.maximpolyakov.quicklink.neoforge.client;
 
-import com.maximpolyakov.quicklink.QuickLink;
 import com.maximpolyakov.quicklink.neoforge.UpgradeTier;
 import com.maximpolyakov.quicklink.neoforge.blockentity.EnergyPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.blockentity.FluidPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.blockentity.ItemPlugBlockEntity;
+import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.BlockHitResult;
-import net.neoforged.api.distmarker.Dist;
-import net.neoforged.bus.api.SubscribeEvent;
-import net.neoforged.fml.common.EventBusSubscriber;
-import net.neoforged.neoforge.client.event.RenderGuiEvent;
+import net.neoforged.neoforge.client.gui.GuiLayer;
 
-@EventBusSubscriber(modid = QuickLink.MOD_ID, value = Dist.CLIENT)
 public final class QuickLinkHudOverlay {
 
-    @SubscribeEvent
-    public static void onRenderGui(RenderGuiEvent.Post event) {
+    public static final GuiLayer LAYER = QuickLinkHudOverlay::render;
+
+    private static void render(net.minecraft.client.gui.GuiGraphicsExtractor gui, DeltaTracker delta) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.level == null || mc.player == null || mc.options.hideGui) return;
         if (mc.screen != null) return;
@@ -28,8 +25,8 @@ public final class QuickLinkHudOverlay {
         BlockEntity be = mc.level.getBlockEntity(pos);
 
         int tier = -1;
-        if (be instanceof ItemPlugBlockEntity ipbe)   tier = ipbe.getUpgradeTier();
-        else if (be instanceof FluidPlugBlockEntity fpbe) tier = fpbe.getUpgradeTier();
+        if (be instanceof ItemPlugBlockEntity ipbe)        tier = ipbe.getUpgradeTier();
+        else if (be instanceof FluidPlugBlockEntity fpbe)  tier = fpbe.getUpgradeTier();
         else if (be instanceof EnergyPlugBlockEntity epbe) tier = epbe.getUpgradeTier();
 
         if (tier < 0) return;
@@ -44,6 +41,6 @@ public final class QuickLinkHudOverlay {
         int y = h / 2 + 20;
 
         int color = tier == 0 ? 0xAAAAAA : 0xFFD700;
-        event.getGuiGraphics().text(mc.font, text, x, y, color, true);
+        gui.text(mc.font, text, x, y, color, true);
     }
 }
