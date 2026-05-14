@@ -1,5 +1,18 @@
 {
   "block.quicklink.item_plug": "Item Plug",
   "block.quicklink.fluid_plug": "Fluid Plug",
-  "block.quicklink.energy_plug": "Energy Plug"
+  "block.quicklink.energy_plug": "Energy Plug",
+
+  "item.quicklink.item_plug": "Item Plug",
+  "item.quicklink.fluid_plug": "Fluid Plug",
+  "item.quicklink.energy_plug": "Energy Plug",
+  "item.quicklink.quicklink_upgrade": "QuickLink Upgrade",
+
+  "tooltip.item.quicklink.item_plug.1":   "Moves items between inventories. PLUG side = source, POINT side = destination.",
+  "tooltip.item.quicklink.fluid_plug.1":  "Transfers fluids between tanks. PLUG side = source, POINT side = destination.",
+  "tooltip.item.quicklink.energy_plug.1": "Transfers FE energy between machines. PLUG side = source, POINT side = destination.",
+  "tooltip.quicklink.plug.use": "Same color = connected. RMB: cycle role | Shift+RMB: toggle / remove upgrade | Dye: color",
+
+  "tooltip.item.quicklink.quicklink_upgrade.1": "Boosts plug transfer speed: tier 1=×2, 2=×4, 3=×8, 4=×16.",
+  "tooltip.item.quicklink.quicklink_upgrade.2": "RMB on plug: install | Shift+RMB empty hand on plug: remove"
 }
