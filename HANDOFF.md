@@ -4,7 +4,8 @@
 
 **Branch:** `migration/mc-26.1.2`  
 **Build:** PASSING — `./gradlew build` produces `build/libs/QuickLink-1.0.9-26.1.2.jar`  
-**In-game:** Blocks load, register, recipe/lang errors fixed. **One open bug: HUD overlay not rendering.**
+**In-game:** All features working. ItemPlug tested ✓. Fluid and Energy plugs pending full test.  
+**Open issues:** None.
 
 ---
 
@@ -17,6 +18,7 @@
 | `87c7a2f` | Block/item `setId()` fix; recipe ingredient format; `items/` model JSONs |
 | `7411c5f` | Lang: `item.*` keys, `tooltip.item.*` keys, en_us into common/ |
 | `5e62d72` | HUD overlay: switched from `RenderGuiEvent.Post` to `RegisterGuiLayersEvent` + `GuiLayer` |
+| `785d15a` | Fix HUD overlay: prepend `0xFF` alpha to color constants (`GuiGraphicsExtractor.text()` checks ARGB alpha) |
 
 ---
 

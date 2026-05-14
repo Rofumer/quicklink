@@ -101,12 +101,7 @@ level.getDataStorage().computeIfAbsent(TYPE);  // no factory lambda
 
 ## Open Issues
 
-**HUD overlay not rendering** (`QuickLinkHudOverlay`):
-- Event fires ✓, BE found ✓, `gui.text()` called ✓, but nothing appears on screen
-- Tried: `RenderGuiEvent.Post` (doesn't work — fires after GuiRenderState flush)
-- Tried: `RegisterGuiLayersEvent` + `registerAboveAll` (current code — still not working)
-- Next to investigate: how does NeoForge 26.x `GuiLayer.render()` actually commit draws?
-  Check `VanillaGuiLayers` source or decompile `GuiLayerManager` to see render flow.
+None. Migration to MC 26.1.2 is complete. ItemPlug tested in-game. Fluid and Energy plugs pending full test.
 
 ## Conventions
 
