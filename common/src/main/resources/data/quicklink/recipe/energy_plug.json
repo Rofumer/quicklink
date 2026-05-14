@@ -6,15 +6,9 @@
     " B "
   ],
   "key": {
-    "I": {
-      "item": "minecraft:iron_block"
-    },
-    "R": {
-      "item": "minecraft:redstone_block"
-    },
-    "B": {
-      "item": "minecraft:gold_block"
-    }
+    "I": "minecraft:iron_block",
+    "R": "minecraft:redstone_block",
+    "B": "minecraft:gold_block"
   },
   "result": {
     "id": "quicklink:energy_plug"

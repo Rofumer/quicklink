@@ -1,0 +1,6 @@
+{
+  "model": {
+    "type": "minecraft:model",
+    "model": "quicklink:item/energy_plug"
+  }
+}

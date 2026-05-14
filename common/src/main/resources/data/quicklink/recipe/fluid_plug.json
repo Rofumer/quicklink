@@ -6,15 +6,9 @@
     " B "
   ],
   "key": {
-    "I": {
-      "item": "minecraft:iron_block"
-    },
-    "R": {
-      "item": "minecraft:lapis_block"
-    },
-    "B": {
-      "item": "minecraft:bamboo_block"
-    }
+    "I": "minecraft:iron_block",
+    "R": "minecraft:lapis_block",
+    "B": "minecraft:bamboo_block"
   },
   "result": {
     "id": "quicklink:fluid_plug"

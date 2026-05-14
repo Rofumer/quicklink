@@ -12,6 +12,7 @@ import com.maximpolyakov.quicklink.neoforge.blockentity.EnergyPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.blockentity.FluidPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.blockentity.ItemPlugBlockEntity;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.CreativeModeTabs;
 import net.minecraft.world.item.Item;
@@ -41,11 +42,10 @@ public final class QuickLinkNeoForge {
 
     public static final DeferredHolder<Block, Block> ITEM_PLUG =
             BLOCKS.register("item_plug",
-                    () -> new ItemPlugBlock(Block.Properties.of().strength(0.3f).noOcclusion()));
-
+                    id -> new ItemPlugBlock(Block.Properties.of().setId(ResourceKey.create(Registries.BLOCK, id)).strength(0.3f).noOcclusion()));
 
     public static final DeferredHolder<Item, Item> ITEM_PLUG_ITEM =
-            ITEMS.register("item_plug", () -> new QuickLinkPlugBlockItem(ITEM_PLUG.get(), new Item.Properties()));
+            ITEMS.register("item_plug", id -> new QuickLinkPlugBlockItem(ITEM_PLUG.get(), new Item.Properties().setId(ResourceKey.create(Registries.ITEM, id))));
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<ItemPlugBlockEntity>> ITEM_PLUG_BE =
             BLOCK_ENTITIES.register("item_plug",
@@ -53,12 +53,12 @@ public final class QuickLinkNeoForge {
 
     public static final DeferredHolder<Block, FluidPlugBlock> FLUID_PLUG_BLOCK = BLOCKS.register(
             "fluid_plug",
-            () -> new FluidPlugBlock(BlockBehaviour.Properties.of().strength(0.3F).noOcclusion())
+            id -> new FluidPlugBlock(BlockBehaviour.Properties.of().setId(ResourceKey.create(Registries.BLOCK, id)).strength(0.3F).noOcclusion())
     );
 
     public static final DeferredHolder<Item, BlockItem> FLUID_PLUG_ITEM = ITEMS.register(
             "fluid_plug",
-            () -> new QuickLinkPlugBlockItem(FLUID_PLUG_BLOCK.get(), new Item.Properties())
+            id -> new QuickLinkPlugBlockItem(FLUID_PLUG_BLOCK.get(), new Item.Properties().setId(ResourceKey.create(Registries.ITEM, id)))
     );
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<FluidPlugBlockEntity>> FLUID_PLUG_BE =
@@ -66,16 +66,16 @@ public final class QuickLinkNeoForge {
                     () -> new BlockEntityType<>(FluidPlugBlockEntity::new, FLUID_PLUG_BLOCK.get()));
 
     public static final DeferredHolder<Item, Item> UPGRADE_ITEM =
-            ITEMS.register("quicklink_upgrade", () -> new QuickLinkUpgradeItem(new Item.Properties().stacksTo(64)));
+            ITEMS.register("quicklink_upgrade", id -> new QuickLinkUpgradeItem(new Item.Properties().setId(ResourceKey.create(Registries.ITEM, id)).stacksTo(64)));
 
     public static final DeferredHolder<Block, EnergyPlugBlock> ENERGY_PLUG_BLOCK = BLOCKS.register(
             "energy_plug",
-            () -> new EnergyPlugBlock(BlockBehaviour.Properties.of().strength(0.3F).noOcclusion())
+            id -> new EnergyPlugBlock(BlockBehaviour.Properties.of().setId(ResourceKey.create(Registries.BLOCK, id)).strength(0.3F).noOcclusion())
     );
 
     public static final DeferredHolder<Item, BlockItem> ENERGY_PLUG_ITEM = ITEMS.register(
             "energy_plug",
-            () -> new QuickLinkPlugBlockItem(ENERGY_PLUG_BLOCK.get(), new Item.Properties())
+            id -> new QuickLinkPlugBlockItem(ENERGY_PLUG_BLOCK.get(), new Item.Properties().setId(ResourceKey.create(Registries.ITEM, id)))
     );
 
     public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<EnergyPlugBlockEntity>> ENERGY_PLUG_BE =
