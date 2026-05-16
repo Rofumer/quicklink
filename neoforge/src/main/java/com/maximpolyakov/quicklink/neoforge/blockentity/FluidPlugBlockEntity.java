@@ -17,6 +17,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
+import net.neoforged.neoforge.capabilities.BlockCapabilityCache;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
@@ -26,10 +27,7 @@ import net.neoforged.neoforge.transfer.transaction.TransactionContext;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Set;
 
 public class FluidPlugBlockEntity extends BlockEntity {
 
@@ -51,6 +49,9 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
     private java.util.Set<Integer> lastRegPlugKeys = new java.util.HashSet<>();
     private java.util.Set<Integer> lastRegPointKeys = new java.util.HashSet<>();
+    @SuppressWarnings("unchecked")
+    private final BlockCapabilityCache<ResourceHandler<FluidResource>, Direction>[] neighborCaches =
+        new BlockCapabilityCache[6];
     private final ResourceHandler<FluidResource>[] sideCapabilities;
 
     @SuppressWarnings("unchecked")
@@ -218,7 +219,16 @@ public class FluidPlugBlockEntity extends BlockEntity {
     @Override
     public void onLoad() {
         super.onLoad();
-        if (level != null && !level.isClientSide()) syncRegistration();
+        if (level instanceof ServerLevel sl) {
+            for (Direction side : Direction.values()) {
+                neighborCaches[dirIndex(side)] = BlockCapabilityCache.create(
+                    Capabilities.Fluid.BLOCK, sl,
+                    worldPosition.relative(side), side.getOpposite(),
+                    () -> !isRemoved(), () -> {}
+                );
+            }
+            syncRegistration();
+        }
     }
 
     @Override
@@ -304,16 +314,12 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
             for (Direction pointSide : Direction.values()) {
                 if (!pointBe.isPlugEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
-                List<IFluidHandler> dsts = getAllFillHandlers(pointLevel, ref.pos(), pointSide);
-                if (dsts.isEmpty()) continue;
+                IFluidHandler dst = pointBe.getCachedNeighborFluidHandler(pointSide);
+                if (dst == null) continue;
 
                 FluidStack toFill = resource.copy();
                 toFill.setAmount(left);
-                int accepted = 0;
-                for (IFluidHandler dst : dsts) {
-                    accepted = dst.fill(toFill, action);
-                    if (accepted > 0) break;
-                }
+                int accepted = dst.fill(toFill, action);
                 if (accepted <= 0) continue;
 
                 moved += accepted;
@@ -360,7 +366,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
                     return provided;
                 }
 
-                IFluidHandler src = getAttachedFluidHandlerForDrain(plugLevel, ref.pos(), plugSide);
+                IFluidHandler src = plugBe.getCachedNeighborFluidHandler(plugSide);
                 if (src == null) continue;
 
                 FluidStack drained = (match == null)
@@ -380,12 +386,12 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
     private void tryTransferOnce(ServerLevel sl, Direction plugSide, int amountMB) {
         int networkKey = getNetworkKey(plugSide);
-        List<IFluidHandler> dsts = getAllFillHandlers(sl, worldPosition, plugSide);
-        if (dsts.isEmpty()) return;
+        IFluidHandler dst = getCachedNeighborFluidHandler(plugSide);
+        if (dst == null) return;
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
 
-        record Src(ServerLevel lvl, BlockPos pos, Direction dir, FluidPlugBlockEntity be) {}
+        record Src(FluidPlugBlockEntity be, Direction dir) {}
         List<Src> sources = new ArrayList<>();
         for (QuickLinkFluidNetworkManager.GlobalPosRef ref : mgr.getPointsSnapshot(networkKey)) {
             ServerLevel pl = sl.getServer().getLevel(ref.dimension());
@@ -394,7 +400,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
             if (!(be instanceof FluidPlugBlockEntity pBe) || !pBe.enabled) continue;
             for (Direction d : Direction.values()) {
                 if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
-                sources.add(new Src(pl, ref.pos(), d, pBe));
+                sources.add(new Src(pBe, d));
             }
         }
         if (sources.isEmpty()) return;
@@ -407,11 +413,11 @@ public class FluidPlugBlockEntity extends BlockEntity {
             Src s = sources.get(idx);
             boolean moved;
             if (s.be().isInfiniteWater(s.dir())) {
-                moved = pushInfiniteWater(dsts, s.be(), s.dir());
+                moved = pushInfiniteWater(dst, s.be(), s.dir());
             } else {
-                IFluidHandler src = getAttachedFluidHandlerForDrain(s.lvl(), s.pos(), s.dir());
+                IFluidHandler src = s.be().getCachedNeighborFluidHandler(s.dir());
                 if (src == null) continue;
-                moved = moveFluidAny(src, dsts, amountMB);
+                moved = moveFluidAny(src, dst, amountMB);
             }
             if (moved) {
                 rrIndexBySide[pIdx] = (idx + 1) % sources.size();
@@ -424,18 +430,15 @@ public class FluidPlugBlockEntity extends BlockEntity {
         setChanged();
     }
 
-    private static boolean pushInfiniteWater(List<IFluidHandler> dsts, FluidPlugBlockEntity plugBe, Direction pointSide) {
+    private static boolean pushInfiniteWater(@Nullable IFluidHandler dst, FluidPlugBlockEntity plugBe, Direction pointSide) {
         int idx = dirIndex(pointSide);
         long rateMb = plugBe.effectiveInfiniteMbPerTick();
         int maxChunk = plugBe.effectiveInfiniteMaxPush();
         plugBe.waterAccumBySide[idx] += rateMb;
 
-        FluidStack probe = new FluidStack(Fluids.WATER, 1);
-        IFluidHandler dst = null;
-        for (IFluidHandler h : dsts) {
-            if (h.fill(probe, IFluidHandler.FluidAction.SIMULATE) > 0) { dst = h; break; }
-        }
         if (dst == null) return false;
+        FluidStack probe = new FluidStack(Fluids.WATER, 1);
+        if (dst.fill(probe, IFluidHandler.FluidAction.SIMULATE) <= 0) return false;
 
         boolean movedAny = false;
         for (int i = 0; i < 8; i++) {
@@ -452,62 +455,37 @@ public class FluidPlugBlockEntity extends BlockEntity {
     }
 
     @Nullable
-    private static IFluidHandler getAttachedFluidHandlerForDrain(ServerLevel level, BlockPos selfPos, Direction side) {
-        BlockPos target = selfPos.relative(side);
-        Direction targetFaceTowardUs = side.getOpposite();
+    private IFluidHandler getCachedNeighborFluidHandler(Direction side) {
+        BlockPos target = worldPosition.relative(side);
+        Direction targetFace = side.getOpposite();
         BlockEntity be = level.getBlockEntity(target);
         if (be instanceof FluidPlugBlockEntity plug) {
-            ResourceHandler<FluidResource> rh = plug.getExternalFluidHandler(targetFaceTowardUs);
+            ResourceHandler<FluidResource> rh = plug.getExternalFluidHandler(targetFace);
             return rh != null ? IFluidHandler.of(rh) : null;
         }
-        ResourceHandler<FluidResource> rh = level.getCapability(Capabilities.Fluid.BLOCK, target, targetFaceTowardUs);
+        BlockCapabilityCache<ResourceHandler<FluidResource>, Direction> cache = neighborCaches[dirIndex(side)];
+        ResourceHandler<FluidResource> rh = cache != null
+            ? cache.getCapability()
+            : level.getCapability(Capabilities.Fluid.BLOCK, target, targetFace);
         return rh != null ? IFluidHandler.of(rh) : null;
     }
 
-    private static List<IFluidHandler> getAllFillHandlers(ServerLevel level, BlockPos selfPos, Direction side) {
-        BlockPos target = selfPos.relative(side);
-        BlockEntity be = level.getBlockEntity(target);
-
-        if (be instanceof FluidPlugBlockEntity plug) {
-            ResourceHandler<FluidResource> rh = plug.getExternalFluidHandler(side.getOpposite());
-            return rh != null ? List.of(IFluidHandler.of(rh)) : List.of();
-        }
-
-        List<IFluidHandler> result = new ArrayList<>();
-        Set<ResourceHandler<FluidResource>> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-
-        ResourceHandler<FluidResource> h = level.getCapability(Capabilities.Fluid.BLOCK, target, null);
-        if (h != null && seen.add(h)) result.add(IFluidHandler.of(h));
-
-        for (Direction d : Direction.values()) {
-            h = level.getCapability(Capabilities.Fluid.BLOCK, target, d);
-            if (h != null && seen.add(h)) result.add(IFluidHandler.of(h));
-        }
-        return result;
-    }
-
-    private static boolean moveFluidAny(IFluidHandler src, List<IFluidHandler> dsts, int amountMB) {
-        if (amountMB <= 0 || dsts.isEmpty()) return false;
+    private static boolean moveFluidAny(IFluidHandler src, @Nullable IFluidHandler dst, int amountMB) {
+        if (amountMB <= 0 || dst == null) return false;
 
         FluidStack canDrain = src.drain(amountMB, IFluidHandler.FluidAction.SIMULATE);
         if (canDrain.isEmpty() || canDrain.getAmount() <= 0) return false;
 
-        IFluidHandler chosenDst = null;
-        int chosenFill = 0;
-        for (IFluidHandler dst : dsts) {
-            int canFill = dst.fill(canDrain, IFluidHandler.FluidAction.SIMULATE);
-            if (canFill > 0) { chosenDst = dst; chosenFill = canFill; break; }
-        }
-        if (chosenDst == null) return false;
+        int canFill = dst.fill(canDrain, IFluidHandler.FluidAction.SIMULATE);
+        if (canFill <= 0) return false;
 
-        int toMove = Math.min(canDrain.getAmount(), chosenFill);
+        int toMove = Math.min(canDrain.getAmount(), canFill);
         if (toMove <= 0) return false;
 
         FluidStack drained = src.drain(toMove, IFluidHandler.FluidAction.EXECUTE);
         if (drained.isEmpty() || drained.getAmount() <= 0) return false;
 
-        int filled = chosenDst.fill(drained, IFluidHandler.FluidAction.EXECUTE);
-        return filled > 0;
+        return dst.fill(drained, IFluidHandler.FluidAction.EXECUTE) > 0;
     }
 
     private FluidStack peekNetworkFluid(Direction outputSide) {
@@ -525,7 +503,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
             for (Direction plugSide : Direction.values()) {
                 if (!plugBe.isPointEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
                 if (plugBe.isInfiniteWater(plugSide)) return new FluidStack(Fluids.WATER, 1);
-                IFluidHandler src = getAttachedFluidHandlerForDrain(plugLevel, ref.pos(), plugSide);
+                IFluidHandler src = plugBe.getCachedNeighborFluidHandler(plugSide);
                 if (src == null) continue;
                 FluidStack simulated = src.drain(1, IFluidHandler.FluidAction.SIMULATE);
                 if (!simulated.isEmpty()) return simulated;

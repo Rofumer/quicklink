@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.entity.HopperBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
+import net.neoforged.neoforge.capabilities.BlockCapabilityCache;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.transfer.ResourceHandler;
 import net.neoforged.neoforge.transfer.item.ItemResource;
@@ -50,6 +51,9 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
     private java.util.Set<Integer> lastRegPlugKeys = new java.util.HashSet<>();
     private java.util.Set<Integer> lastRegPointKeys = new java.util.HashSet<>();
+    @SuppressWarnings("unchecked")
+    private final BlockCapabilityCache<ResourceHandler<ItemResource>, Direction>[] neighborCaches =
+        new BlockCapabilityCache[6];
     private final ResourceHandler<ItemResource>[] sideCapabilities;
 
     @SuppressWarnings("unchecked")
@@ -219,7 +223,16 @@ public class ItemPlugBlockEntity extends BlockEntity {
     @Override
     public void onLoad() {
         super.onLoad();
-        if (level != null && !level.isClientSide()) syncRegistration();
+        if (level instanceof ServerLevel sl) {
+            for (Direction side : Direction.values()) {
+                neighborCaches[dirIndex(side)] = BlockCapabilityCache.create(
+                    Capabilities.Item.BLOCK, sl,
+                    worldPosition.relative(side), side.getOpposite(),
+                    () -> !isRemoved(), () -> {}
+                );
+            }
+            syncRegistration();
+        }
     }
 
     @Override
@@ -311,7 +324,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
             for (Direction plugSide : Direction.values()) {
                 if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
-                ResourceHandler<ItemResource> dst = getAttachedHandler(plugLevel, ref.pos(), plugSide);
+                ResourceHandler<ItemResource> dst = plugBe.getAttachedNeighborHandler(plugSide);
                 if (dst == null) continue;
 
                 int toInsert = amount - moved;
@@ -349,7 +362,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
             for (Direction pointSide : Direction.values()) {
                 if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
 
-                ResourceHandler<ItemResource> src = getAttachedHandler(pointLevel, ref.pos(), pointSide);
+                ResourceHandler<ItemResource> src = pointBe.getAttachedNeighborHandler(pointSide);
                 if (src == null) continue;
 
                 int extracted = 0;
@@ -375,13 +388,13 @@ public class ItemPlugBlockEntity extends BlockEntity {
     }
 
     private void tryPushOnce(ServerLevel sl, Direction plugSide) {
-        ResourceHandler<ItemResource> dst = getAttachedHandler(sl, worldPosition, plugSide);
+        ResourceHandler<ItemResource> dst = getAttachedNeighborHandler(plugSide);
         if (dst == null) return;
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
         int networkKey = getNetworkKey(plugSide);
 
-        record Src(ServerLevel lvl, BlockPos pos, Direction dir) {}
+        record Src(ItemPlugBlockEntity be, Direction dir) {}
         List<Src> sources = new ArrayList<>();
         for (QuickLinkNetworkManager.GlobalPosRef ref : mgr.getPointsSnapshot(networkKey)) {
             ServerLevel pl = sl.getServer().getLevel(ref.dimension());
@@ -390,7 +403,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
             if (!(be instanceof ItemPlugBlockEntity pBe) || !pBe.enabled) continue;
             for (Direction d : Direction.values()) {
                 if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
-                sources.add(new Src(pl, ref.pos(), d));
+                sources.add(new Src(pBe, d));
             }
         }
         if (sources.isEmpty()) return;
@@ -401,7 +414,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
         for (int i = 0; i < sources.size(); i++) {
             int idx = (start + i) % sources.size();
             Src s = sources.get(idx);
-            ResourceHandler<ItemResource> src = getAttachedHandler(s.lvl(), s.pos(), s.dir());
+            ResourceHandler<ItemResource> src = s.be().getAttachedNeighborHandler(s.dir());
             if (src == null) continue;
 
             int moved = moveItems(src, dst, effectiveMoveBatch());
@@ -421,13 +434,13 @@ public class ItemPlugBlockEntity extends BlockEntity {
     // ------------------------------------------------
 
     @Nullable
-    private static ResourceHandler<ItemResource> getAttachedHandler(ServerLevel level, BlockPos selfPos, Direction side) {
-        BlockPos target = selfPos.relative(side);
-        Direction targetFaceTowardUs = side.getOpposite();
-        ResourceHandler<ItemResource> handler = level.getCapability(Capabilities.Item.BLOCK, target, targetFaceTowardUs);
+    private ResourceHandler<ItemResource> getAttachedNeighborHandler(Direction side) {
+        BlockCapabilityCache<ResourceHandler<ItemResource>, Direction> cache = neighborCaches[dirIndex(side)];
+        ResourceHandler<ItemResource> handler = cache != null
+            ? cache.getCapability()
+            : level.getCapability(Capabilities.Item.BLOCK, worldPosition.relative(side), side.getOpposite());
         if (handler != null) return handler;
-
-        Container container = HopperBlockEntity.getContainerAt(level, target);
+        Container container = HopperBlockEntity.getContainerAt((ServerLevel) level, worldPosition.relative(side));
         return container == null ? null : VanillaContainerWrapper.of(container);
     }
 
