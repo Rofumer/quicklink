@@ -99,6 +99,43 @@ level.getDataStorage().computeIfAbsent(TYPE);  // no factory lambda
 
 `build.gradle` in root handles everything. `neoforge/build.gradle` is a stub comment only.
 
+## Block Entity Performance Pattern
+
+All three BEs use `BlockCapabilityCache` to avoid raw `level.getCapability(...)` calls every tick:
+
+```java
+// Field (per BE, 6 entries — one per Direction):
+BlockCapabilityCache<HandlerType, Direction>[] neighborCaches = new BlockCapabilityCache[6];
+
+// Initialized in onLoad() (server-side only):
+@Override
+public void onLoad() {
+    super.onLoad();
+    if (level instanceof ServerLevel sl) {
+        for (Direction side : Direction.values()) {
+            neighborCaches[dirIndex(side)] = BlockCapabilityCache.create(
+                Capabilities.X.BLOCK, sl,
+                worldPosition.relative(side), side.getOpposite(),
+                () -> !isRemoved(), () -> {}
+            );
+        }
+        syncRegistration();
+    }
+}
+
+// Access via instance method (NOT a static helper):
+@Nullable
+private HandlerType getAttachedNeighborHandler(Direction side) {
+    BlockCapabilityCache<HandlerType, Direction> cache = neighborCaches[dirIndex(side)];
+    return cache != null ? cache.getCapability()
+        : level.getCapability(Capabilities.X.BLOCK, worldPosition.relative(side), side.getOpposite());
+}
+```
+
+Network iteration uses `record Src(BEType be, Direction dir)` so that `s.be().getAttachedNeighborHandler(s.dir())` goes through the owning BE's own cache.
+
+**FluidPlugBE specifics:** `getCachedNeighborFluidHandler(Direction)` checks if the neighbor is itself a `FluidPlugBlockEntity` first (peer-to-peer path), then falls through to the cache. Returns `IFluidHandler.of(rh)` wrapper.
+
 ## Open Issues
 
 None. Migration to MC 26.1.2 is complete. ItemPlug tested in-game. Fluid and Energy plugs pending full test.
