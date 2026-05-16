@@ -16,6 +16,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.neoforged.neoforge.capabilities.BlockCapabilityCache;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.energy.IEnergyStorage;
 import org.jetbrains.annotations.Nullable;
@@ -39,6 +40,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
     private java.util.Set<Integer> lastRegPlugKeys = new java.util.HashSet<>();
     private java.util.Set<Integer> lastRegPointKeys = new java.util.HashSet<>();
+    @SuppressWarnings("unchecked")
+    private final BlockCapabilityCache<IEnergyStorage, Direction>[] neighborCaches = new BlockCapabilityCache[6];
     private final IEnergyStorage[] sideCapabilities = new IEnergyStorage[6];
 
     public EnergyPlugBlockEntity(BlockPos pos, BlockState state) {
@@ -171,7 +174,16 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     @Override
     public void onLoad() {
         super.onLoad();
-        if (level != null && !level.isClientSide) syncRegistration();
+        if (level instanceof ServerLevel sl) {
+            for (Direction side : Direction.values()) {
+                neighborCaches[dirIndex(side)] = BlockCapabilityCache.create(
+                    Capabilities.EnergyStorage.BLOCK, sl,
+                    worldPosition.relative(side), side.getOpposite(),
+                    () -> !isRemoved(), () -> {}
+                );
+            }
+            syncRegistration();
+        }
     }
 
     @Override
@@ -259,7 +271,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
             for (Direction plugSide : Direction.values()) {
                 if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
-                IEnergyStorage dst = getAttachedEnergyStorage(plugLevel, ref.pos(), plugSide);
+                IEnergyStorage dst = plugBe.getAttachedNeighborHandler(plugSide);
                 if (dst == null || !dst.canReceive()) continue;
 
                 int accepted = dst.receiveEnergy(left, simulate);
@@ -304,7 +316,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
             for (Direction pointSide : Direction.values()) {
                 if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
 
-                IEnergyStorage src = getAttachedEnergyStorage(pointLevel, ref.pos(), pointSide);
+                IEnergyStorage src = pointBe.getAttachedNeighborHandler(pointSide);
                 if (src == null || !src.canExtract()) continue;
 
                 int extracted = src.extractEnergy(left, simulate);
@@ -326,13 +338,13 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     }
 
     private void tryTransferOnce(ServerLevel sl, Direction plugSide, int amountFE) {
-        IEnergyStorage dst = getAttachedEnergyStorage(sl, worldPosition, plugSide);
+        IEnergyStorage dst = getAttachedNeighborHandler(plugSide);
         if (dst == null) return;
 
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
         int networkKey = getNetworkKey(plugSide);
 
-        record Src(ServerLevel lvl, BlockPos pos, Direction dir) {}
+        record Src(EnergyPlugBlockEntity be, Direction dir) {}
         List<Src> sources = new ArrayList<>();
         for (QuickLinkEnergyNetworkManager.GlobalPosRef ref : mgr.getPointsSnapshot(networkKey)) {
             ServerLevel pl = sl.getServer().getLevel(ref.dimension());
@@ -341,7 +353,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
             if (!(be instanceof EnergyPlugBlockEntity pBe) || !pBe.enabled) continue;
             for (Direction d : Direction.values()) {
                 if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
-                sources.add(new Src(pl, ref.pos(), d));
+                sources.add(new Src(pBe, d));
             }
         }
         if (sources.isEmpty()) return;
@@ -352,7 +364,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         for (int i = 0; i < sources.size(); i++) {
             int idx = (start + i) % sources.size();
             Src s = sources.get(idx);
-            IEnergyStorage src = getAttachedEnergyStorage(s.lvl(), s.pos(), s.dir());
+            IEnergyStorage src = s.be().getAttachedNeighborHandler(s.dir());
             if (src == null) continue;
 
             if (moveEnergy(src, dst, amountFE)) {
@@ -367,10 +379,11 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     }
 
     @Nullable
-    private static IEnergyStorage getAttachedEnergyStorage(ServerLevel level, BlockPos selfPos, Direction side) {
-        BlockPos target = selfPos.relative(side);
-        Direction targetFaceTowardUs = side.getOpposite();
-        return level.getCapability(Capabilities.EnergyStorage.BLOCK, target, targetFaceTowardUs);
+    private IEnergyStorage getAttachedNeighborHandler(Direction side) {
+        BlockCapabilityCache<IEnergyStorage, Direction> cache = neighborCaches[dirIndex(side)];
+        return cache != null
+            ? cache.getCapability()
+            : level.getCapability(Capabilities.EnergyStorage.BLOCK, worldPosition.relative(side), side.getOpposite());
     }
 
     private static boolean moveEnergy(IEnergyStorage src, IEnergyStorage dst, int amountFE) {
