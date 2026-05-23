@@ -20,6 +20,10 @@ public final class QuickLinkConfig {
     public static final ModConfigSpec.IntValue ENERGY_TICK_PERIOD;
     public static final ModConfigSpec.IntValue ENERGY_TRANSFER_FE;
 
+    // ===== Chemicals =====
+    public static final ModConfigSpec.IntValue CHEMICAL_TICK_PERIOD;
+    public static final ModConfigSpec.IntValue CHEMICAL_TRANSFER_MB;
+
     static {
         ModConfigSpec.Builder b = new ModConfigSpec.Builder();
 
@@ -59,6 +63,16 @@ public final class QuickLinkConfig {
         ENERGY_TRANSFER_FE = b
                 .comment("How much FE to transfer per attempt.")
                 .defineInRange("transferFe", 1000, 1, 1_000_000);
+        b.pop();
+
+        b.push("chemicals");
+        CHEMICAL_TICK_PERIOD = b
+                .comment("Attempt period in ticks (20 ticks = 1 second). Lower = faster.")
+                .defineInRange("tickPeriod", 10, 1, 200);
+
+        CHEMICAL_TRANSFER_MB = b
+                .comment("How many millibuckets to transfer per attempt.")
+                .defineInRange("transferMb", 250, 1, 8000);
         b.pop();
 
         SPEC = b.build();

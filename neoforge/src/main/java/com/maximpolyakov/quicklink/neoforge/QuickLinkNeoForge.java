@@ -1,13 +1,16 @@
 package com.maximpolyakov.quicklink.neoforge;
 
+import com.maximpolyakov.quicklink.neoforge.blockentity.ChemCompatLayer;
 import com.maximpolyakov.quicklink.neoforge.config.QuickLinkConfig;
 import com.maximpolyakov.quicklink.neoforge.item.QuickLinkPlugBlockItem;
 import com.maximpolyakov.quicklink.neoforge.item.QuickLinkUpgradeItem;
 import net.neoforged.fml.config.ModConfig;
 import com.maximpolyakov.quicklink.QuickLink;
+import com.maximpolyakov.quicklink.neoforge.block.ChemicalPlugBlock;
 import com.maximpolyakov.quicklink.neoforge.block.FluidPlugBlock;
 import com.maximpolyakov.quicklink.neoforge.block.EnergyPlugBlock;
 import com.maximpolyakov.quicklink.neoforge.block.ItemPlugBlock;
+import com.maximpolyakov.quicklink.neoforge.blockentity.ChemicalPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.blockentity.EnergyPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.blockentity.FluidPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.blockentity.ItemPlugBlockEntity;
@@ -88,6 +91,23 @@ public final class QuickLinkNeoForge {
                             .build(null)
             );
 
+    public static final DeferredHolder<Block, ChemicalPlugBlock> CHEMICAL_PLUG_BLOCK = BLOCKS.register(
+            "chemical_plug",
+            () -> new ChemicalPlugBlock(BlockBehaviour.Properties.of().strength(0.3F).noOcclusion())
+    );
+
+    public static final DeferredHolder<Item, BlockItem> CHEMICAL_PLUG_ITEM = ITEMS.register(
+            "chemical_plug",
+            () -> new QuickLinkPlugBlockItem(CHEMICAL_PLUG_BLOCK.get(), new Item.Properties())
+    );
+
+    public static final DeferredHolder<BlockEntityType<?>, BlockEntityType<ChemicalPlugBlockEntity>> CHEMICAL_PLUG_BE =
+            BLOCK_ENTITIES.register("chemical_plug",
+                    () -> BlockEntityType.Builder
+                            .of(ChemicalPlugBlockEntity::new, CHEMICAL_PLUG_BLOCK.get())
+                            .build(null)
+            );
+
 
     public QuickLinkNeoForge() {
         QuickLink.init();
@@ -110,6 +130,8 @@ public final class QuickLinkNeoForge {
                 (be, side) -> be.getExternalFluidHandler(side));
         event.registerBlockEntity(Capabilities.EnergyStorage.BLOCK, ENERGY_PLUG_BE.get(),
                 (be, side) -> be.getExternalEnergyStorage(side));
+        // ChemicalPlug uses direct ISidedChemicalHandler instanceof checks;
+        // no BlockCapability constant is available in the Mekanism API jar.
     }
 
     private void addCreative(BuildCreativeModeTabContentsEvent e) {
@@ -117,6 +139,7 @@ public final class QuickLinkNeoForge {
             e.accept(ITEM_PLUG_ITEM.get());
             e.accept(FLUID_PLUG_ITEM.get());
             e.accept(ENERGY_PLUG_ITEM.get());
+            e.accept(CHEMICAL_PLUG_ITEM.get());
             e.accept(UPGRADE_ITEM.get());
         }
     }

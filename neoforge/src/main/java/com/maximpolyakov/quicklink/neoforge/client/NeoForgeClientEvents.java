@@ -16,5 +16,6 @@ public final class NeoForgeClientEvents {
         event.registerBlockEntityRenderer(QuickLinkNeoForge.ITEM_PLUG_BE.get(), ItemPlugBlockEntityRenderer::new);
         event.registerBlockEntityRenderer(QuickLinkNeoForge.FLUID_PLUG_BE.get(), FluidPlugBlockEntityRenderer::new);
         event.registerBlockEntityRenderer(QuickLinkNeoForge.ENERGY_PLUG_BE.get(), EnergyPlugBlockEntityRenderer::new);
+        event.registerBlockEntityRenderer(QuickLinkNeoForge.CHEMICAL_PLUG_BE.get(), ChemicalPlugBlockEntityRenderer::new);
     }
 }

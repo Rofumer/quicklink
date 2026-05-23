@@ -2,6 +2,7 @@ package com.maximpolyakov.quicklink.neoforge.client;
 
 import com.maximpolyakov.quicklink.QuickLink;
 import com.maximpolyakov.quicklink.neoforge.UpgradeTier;
+import com.maximpolyakov.quicklink.neoforge.blockentity.ChemicalPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.blockentity.EnergyPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.blockentity.FluidPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.blockentity.ItemPlugBlockEntity;
@@ -31,6 +32,7 @@ public final class QuickLinkHudOverlay {
         if (be instanceof ItemPlugBlockEntity ipbe)   tier = ipbe.getUpgradeTier();
         else if (be instanceof FluidPlugBlockEntity fpbe) tier = fpbe.getUpgradeTier();
         else if (be instanceof EnergyPlugBlockEntity epbe) tier = epbe.getUpgradeTier();
+        else if (be instanceof ChemicalPlugBlockEntity cpbe) tier = cpbe.getUpgradeTier();
 
         if (tier < 0) return;
 
