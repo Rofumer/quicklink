@@ -130,8 +130,11 @@ public final class QuickLinkNeoForge {
                 (be, side) -> be.getExternalFluidHandler(side));
         event.registerBlockEntity(Capabilities.EnergyStorage.BLOCK, ENERGY_PLUG_BE.get(),
                 (be, side) -> be.getExternalEnergyStorage(side));
-        // ChemicalPlug uses direct ISidedChemicalHandler instanceof checks;
-        // no BlockCapability constant is available in the Mekanism API jar.
+        // Register mekanism:chemical_handler so Pressurized Tubes recognise Chemical Plug
+        // as a valid acceptor, update their AcceptorCache, and expose their own tanks back.
+        if (ChemCompatLayer.LOADED) {
+            ChemCompatLayer.registerPlugCapability(event, CHEMICAL_PLUG_BE.get());
+        }
     }
 
     private void addCreative(BuildCreativeModeTabContentsEvent e) {
