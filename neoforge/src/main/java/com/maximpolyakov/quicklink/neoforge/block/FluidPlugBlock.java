@@ -212,7 +212,7 @@ public class FluidPlugBlock extends BaseEntityBlock {
 
     @Override
     public void spawnDestroyParticles(Level level, Player player, BlockPos pos, BlockState state) {
-        level.levelEvent(player, 2001, pos, Block.getId(Blocks.BLUE_CONCRETE.defaultBlockState()));
+        level.levelEvent(player, 2001, pos, Block.getId(Blocks.CONCRETE.pick(DyeColor.BLUE).defaultBlockState()));
     }
 
     private static int quadSlotFromHit(Direction face, double lx, double ly, double lz) {

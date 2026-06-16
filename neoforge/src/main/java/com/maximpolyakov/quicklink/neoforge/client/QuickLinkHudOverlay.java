@@ -17,8 +17,8 @@ public final class QuickLinkHudOverlay {
 
     private static void render(net.minecraft.client.gui.GuiGraphicsExtractor gui, DeltaTracker delta) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.level == null || mc.player == null || mc.options.hideGui) return;
-        if (mc.screen != null) return;
+        if (mc.level == null || mc.player == null || mc.gui.hud.isHidden()) return;
+        if (mc.gui.screen() != null) return;
         if (!(mc.hitResult instanceof BlockHitResult bhr)) return;
 
         BlockPos pos = bhr.getBlockPos();

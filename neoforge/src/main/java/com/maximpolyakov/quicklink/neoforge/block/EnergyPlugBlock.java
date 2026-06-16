@@ -198,7 +198,7 @@ public class EnergyPlugBlock extends BaseEntityBlock {
 
     @Override
     public void spawnDestroyParticles(Level level, Player player, BlockPos pos, BlockState state) {
-        level.levelEvent(player, 2001, pos, Block.getId(Blocks.RED_CONCRETE.defaultBlockState()));
+        level.levelEvent(player, 2001, pos, Block.getId(Blocks.CONCRETE.pick(DyeColor.RED).defaultBlockState()));
     }
 
     private static int quadSlotFromHit(Direction face, double lx, double ly, double lz) {
