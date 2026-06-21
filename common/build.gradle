@@ -3,10 +3,9 @@ architectury {
 }
 
 dependencies {
-    // We depend on Fabric Loader here to use the Fabric @Environment annotations,
-    // which get remapped to the correct annotations on each platform.
-    // Do NOT use other classes from Fabric Loader.
     modImplementation "net.fabricmc:fabric-loader:$rootProject.fabric_loader_version"
 
-    modImplementation "dev.architectury:architectury:$rootProject.architectury_api_version"
+    // Architectury is only needed at compile time for annotation processing.
+    // It is NOT bundled into the output jar — users don't need it installed.
+    compileOnly "dev.architectury:architectury:$rootProject.architectury_api_version"
 }
