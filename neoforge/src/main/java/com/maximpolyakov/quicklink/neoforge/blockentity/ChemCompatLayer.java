@@ -8,7 +8,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
-import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.capabilities.BlockCapability;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
 import org.jetbrains.annotations.Nullable;
@@ -24,8 +23,6 @@ import java.util.List;
  * Inner class SideChemHandler is a separate class file; JVM loads it lazily.
  */
 public final class ChemCompatLayer {
-
-    public static final boolean LOADED = ModList.get().isLoaded("mekanism");
 
     // Lazily-resolved BlockCapability for mekanism:chemical_handler (sided).
     // BlockCapability.createSided deduplicates by (ResourceLocation, type) so this

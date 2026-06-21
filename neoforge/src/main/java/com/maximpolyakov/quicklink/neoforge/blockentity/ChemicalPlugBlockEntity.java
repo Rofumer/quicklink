@@ -246,7 +246,7 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
         if (!(level instanceof ServerLevel sl)) return;
         if (!be.enabled) return;
         if ((sl.getGameTime() % period) != 0L) return;
-        if (!ChemCompatLayer.LOADED) return;
+        if (!QuickLinkNeoForge.MEKANISM_LOADED) return;
 
         for (Direction plugSide : Direction.values()) {
             if (be.isPlugEnabled(plugSide)) {

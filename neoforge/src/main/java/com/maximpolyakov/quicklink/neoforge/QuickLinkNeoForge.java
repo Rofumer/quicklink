@@ -22,6 +22,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.ModLoadingContext;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.capabilities.Capabilities;
@@ -32,6 +33,8 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 
 @Mod(QuickLink.MOD_ID)
 public final class QuickLinkNeoForge {
+
+    public static final boolean MEKANISM_LOADED = ModList.get().isLoaded("mekanism");
 
     public static final DeferredRegister<Block> BLOCKS =
             DeferredRegister.create(Registries.BLOCK, QuickLink.MOD_ID);
@@ -132,7 +135,7 @@ public final class QuickLinkNeoForge {
                 (be, side) -> be.getExternalEnergyStorage(side));
         // Register mekanism:chemical_handler so Pressurized Tubes recognise Chemical Plug
         // as a valid acceptor, update their AcceptorCache, and expose their own tanks back.
-        if (ChemCompatLayer.LOADED) {
+        if (MEKANISM_LOADED) {
             ChemCompatLayer.registerPlugCapability(event, CHEMICAL_PLUG_BE.get());
         }
     }
