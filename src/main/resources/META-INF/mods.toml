@@ -13,21 +13,21 @@ Wireless item, fluid, energy and chemical transfer via configurable colour-coded
 
 [[dependencies.quicklink]]
 modId = "forge"
-type = "required"
+mandatory = true
 versionRange = "[47,)"
 ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.quicklink]]
 modId = "minecraft"
-type = "required"
+mandatory = true
 versionRange = "[1.20.1,)"
 ordering = "NONE"
 side = "BOTH"
 
 [[dependencies.quicklink]]
 modId = "mekanism"
-type = "optional"
+mandatory = false
 versionRange = "[10.4,)"
 ordering = "AFTER"
 side = "BOTH"
