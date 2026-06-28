@@ -28,7 +28,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityTicker;
 import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.storage.loot.LootContext;
+import net.minecraft.world.level.storage.loot.LootParams;
 import net.minecraft.world.level.storage.loot.parameters.LootContextParams;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
@@ -46,10 +46,10 @@ public class FluidPlugBlock extends BaseEntityBlock {
     @Override public RenderShape getRenderShape(BlockState state) { return RenderShape.MODEL; }
 
     @Override
-    protected VoxelShape getShape(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos, CollisionContext ctx) { return SHAPE; }
+    public VoxelShape getShape(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos, CollisionContext ctx) { return SHAPE; }
 
     @Override
-    protected VoxelShape getCollisionShape(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos, CollisionContext ctx) { return SHAPE; }
+    public VoxelShape getCollisionShape(BlockState state, net.minecraft.world.level.BlockGetter level, BlockPos pos, CollisionContext ctx) { return SHAPE; }
 
     @Nullable @Override
     public BlockEntity newBlockEntity(BlockPos pos, BlockState state) { return new FluidPlugBlockEntity(pos, state); }
@@ -142,7 +142,7 @@ public class FluidPlugBlock extends BaseEntityBlock {
     }
 
     @Override
-    public List<ItemStack> getDrops(BlockState state, LootContext.Builder params) {
+    public List<ItemStack> getDrops(BlockState state, LootParams.Builder params) {
         ItemStack drop = new ItemStack(asItem());
         BlockEntity be0 = params.getOptionalParameter(LootContextParams.BLOCK_ENTITY);
         if (be0 instanceof FluidPlugBlockEntity be) {

@@ -23,9 +23,13 @@ public final class ChemCompatLayer {
 
     // ---- capability accessor (lazy, called only when Mekanism is loaded) ----
 
-    @SuppressWarnings("unchecked")
+    private static final net.minecraftforge.common.capabilities.Capability<mekanism.api.chemical.gas.IGasHandler> GAS_CAP =
+        net.minecraftforge.common.capabilities.CapabilityManager.get(
+            new net.minecraftforge.common.capabilities.CapabilityToken<mekanism.api.chemical.gas.IGasHandler>(){}
+        );
+
     static Capability<mekanism.api.chemical.gas.IGasHandler> gasCap() {
-        return mekanism.api.MekanismAPI.GAS_HANDLER_CAPABILITY;
+        return GAS_CAP;
     }
 
     static boolean isGasCap(Capability<?> cap) {
@@ -41,7 +45,7 @@ public final class ChemCompatLayer {
         net.minecraftforge.common.util.LazyOptional<mekanism.api.chemical.gas.IGasHandler> lo =
                 be.getCapability(gasCap(), face);
         if (lo.isPresent()) return lo.orElse(null);
-        if (be instanceof mekanism.api.chemical.gas.ISidedGasHandler h) return new SidedWrapper(h, face);
+        if (be instanceof mekanism.api.chemical.gas.IGasHandler.ISidedGasHandler h) return new SidedWrapper(h, face);
         return null;
     }
 
@@ -131,24 +135,24 @@ public final class ChemCompatLayer {
         @Override public int getTanks() { return 0; }
         @Override public mekanism.api.chemical.gas.GasStack getChemicalInTank(int t) { return mekanism.api.chemical.gas.GasStack.EMPTY; }
         @Override public void setChemicalInTank(int t, mekanism.api.chemical.gas.GasStack s) {}
-        @Override public long getChemicalTankCapacity(int t) { return 0; }
+        @Override public long getTankCapacity(int t) { return 0; }
         @Override public boolean isValid(int t, mekanism.api.chemical.gas.GasStack s) { return false; }
         @Override public mekanism.api.chemical.gas.GasStack insertChemical(int t, mekanism.api.chemical.gas.GasStack s, mekanism.api.Action a) { return s; }
         @Override public mekanism.api.chemical.gas.GasStack extractChemical(int t, long amount, mekanism.api.Action a) { return mekanism.api.chemical.gas.GasStack.EMPTY; }
     }
 
     static final class SidedWrapper implements mekanism.api.chemical.gas.IGasHandler {
-        private final mekanism.api.chemical.gas.ISidedGasHandler delegate;
+        private final mekanism.api.chemical.gas.IGasHandler.ISidedGasHandler delegate;
         private final Direction face;
 
-        SidedWrapper(mekanism.api.chemical.gas.ISidedGasHandler delegate, Direction face) {
+        SidedWrapper(mekanism.api.chemical.gas.IGasHandler.ISidedGasHandler delegate, Direction face) {
             this.delegate = delegate; this.face = face;
         }
 
         @Override public int getTanks() { return delegate.getTanks(face); }
         @Override public mekanism.api.chemical.gas.GasStack getChemicalInTank(int t) { return delegate.getChemicalInTank(t, face); }
         @Override public void setChemicalInTank(int t, mekanism.api.chemical.gas.GasStack s) { delegate.setChemicalInTank(t, s, face); }
-        @Override public long getChemicalTankCapacity(int t) { return delegate.getChemicalTankCapacity(t, face); }
+        @Override public long getTankCapacity(int t) { return delegate.getTankCapacity(t, face); }
         @Override public boolean isValid(int t, mekanism.api.chemical.gas.GasStack s) { return delegate.isValid(t, s, face); }
         @Override public mekanism.api.chemical.gas.GasStack insertChemical(int t, mekanism.api.chemical.gas.GasStack s, mekanism.api.Action a) { return delegate.insertChemical(t, s, face, a); }
         @Override public mekanism.api.chemical.gas.GasStack extractChemical(int t, long amount, mekanism.api.Action a) { return delegate.extractChemical(t, amount, face, a); }

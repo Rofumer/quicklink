@@ -60,7 +60,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
     @NotNull @Override
     public <T> LazyOptional<T> getCapability(@NotNull Capability<T> cap, @Nullable Direction side) {
-        if (side != null && cap == ForgeCapabilities.ENERGY_STORAGE) {
+        if (side != null && cap == ForgeCapabilities.ENERGY) {
             if (isSideEnabled(side) && getRole(side) != SideRole.NONE)
                 return sideOptionals[dirIndex(side)].cast();
         }
@@ -240,7 +240,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     private IEnergyStorage getAttachedNeighborHandler(Direction side) {
         BlockEntity be = level.getBlockEntity(worldPosition.relative(side));
         if (be instanceof EnergyPlugBlockEntity plug) return plug.getExternalEnergyStorage(side.getOpposite());
-        if (be != null) return be.getCapability(ForgeCapabilities.ENERGY_STORAGE, side.getOpposite()).orElse(null);
+        if (be != null) return be.getCapability(ForgeCapabilities.ENERGY, side.getOpposite()).orElse(null);
         return null;
     }
 
