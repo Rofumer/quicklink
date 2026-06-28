@@ -21,15 +21,19 @@ public final class ChemCompatLayer {
 
     private ChemCompatLayer() {}
 
-    // ---- capability accessor (lazy, called only when Mekanism is loaded) ----
-
-    private static final net.minecraftforge.common.capabilities.Capability<mekanism.api.chemical.gas.IGasHandler> GAS_CAP =
-        net.minecraftforge.common.capabilities.CapabilityManager.get(
-            new net.minecraftforge.common.capabilities.CapabilityToken<mekanism.api.chemical.gas.IGasHandler>(){}
-        );
+    // ---- capability accessor (lazy holder — only loaded when first called) ----
+    // GasCapHolder is a separate class file; JVM loads it lazily on first access.
+    // This prevents Forge's capability_token_subclass transformer from loading
+    // IGasHandler at startup when Mekanism is absent.
+    private static final class GasCapHolder {
+        static final net.minecraftforge.common.capabilities.Capability<mekanism.api.chemical.gas.IGasHandler> CAP =
+            net.minecraftforge.common.capabilities.CapabilityManager.get(
+                new net.minecraftforge.common.capabilities.CapabilityToken<mekanism.api.chemical.gas.IGasHandler>(){}
+            );
+    }
 
     static Capability<mekanism.api.chemical.gas.IGasHandler> gasCap() {
-        return GAS_CAP;
+        return GasCapHolder.CAP;
     }
 
     static boolean isGasCap(Capability<?> cap) {

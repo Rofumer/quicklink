@@ -36,9 +36,9 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
     private java.util.Set<Integer> lastRegPlugKeys  = new java.util.HashSet<>();
     private java.util.Set<Integer> lastRegPointKeys = new java.util.HashSet<>();
 
-    // LazyOptional for the gas capability (Mekanism) exposed per side
-    @SuppressWarnings("unchecked")
-    private final LazyOptional<mekanism.api.chemical.gas.IGasHandler>[] gasOptionals = new LazyOptional[6];
+    // Raw type avoids IGasHandler appearing in Signature attribute at class-load time
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private final LazyOptional[] gasOptionals = new LazyOptional[6];
 
     public ChemicalPlugBlockEntity(BlockPos pos, BlockState state) {
         super(QuickLinkForge.CHEMICAL_PLUG_BE.get(), pos, state);
@@ -61,7 +61,7 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
 
     @Override public void invalidateCaps() {
         super.invalidateCaps();
-        for (LazyOptional<mekanism.api.chemical.gas.IGasHandler> lo : gasOptionals) lo.invalidate();
+        for (LazyOptional<?> lo : gasOptionals) lo.invalidate();
     }
 
     // ---- helpers ----
