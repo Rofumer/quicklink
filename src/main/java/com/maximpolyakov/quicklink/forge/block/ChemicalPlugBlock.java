@@ -38,7 +38,7 @@ import java.util.List;
 
 public class ChemicalPlugBlock extends BaseEntityBlock {
 
-    private static final VoxelShape SHAPE = box(6.0, 6.0, 6.0, 10.0, 10.0, 10.0);
+    private static final VoxelShape SHAPE = Block.box(6.0, 6.0, 6.0, 10.0, 10.0, 10.0);
 
     public ChemicalPlugBlock(Properties props) { super(props); }
 
