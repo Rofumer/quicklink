@@ -116,7 +116,12 @@ public class EnergyPlugBlock extends BaseEntityBlock {
         double ly = hit.getLocation().y - pos.getY();
         double lz = hit.getLocation().z - pos.getZ();
         int slot = quadSlotFromHit(face, lx, ly, lz);
-        be.setColor(face, slot, (byte) dye.getDyeColor().getId());
+        if (player.isShiftKeyDown()) {
+            be.setColor(face, slot, QuickLinkColors.UNSET);
+            player.sendSystemMessage(Component.literal("Color cleared on side " + face));
+        } else {
+            be.setColor(face, slot, (byte) dye.getDyeColor().getId());
+        }
         return InteractionResult.CONSUME;
     }
 
