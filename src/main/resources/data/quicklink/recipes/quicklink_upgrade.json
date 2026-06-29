@@ -11,7 +11,7 @@
     "D": { "item": "minecraft:diamond" }
   },
   "result": {
-    "id": "quicklink:quicklink_upgrade",
+    "item": "quicklink:quicklink_upgrade",
     "count": 1
   }
 }

@@ -10,13 +10,13 @@
       "item": "minecraft:iron_block"
     },
     "R": {
-      "item": "minecraft:lapis_block"
+      "item": "minecraft:redstone_block"
     },
     "B": {
-      "item": "minecraft:bamboo_block"
+      "item": "minecraft:gold_block"
     }
   },
   "result": {
-    "id": "quicklink:fluid_plug"
+    "item": "quicklink:energy_plug"
   }
 }
