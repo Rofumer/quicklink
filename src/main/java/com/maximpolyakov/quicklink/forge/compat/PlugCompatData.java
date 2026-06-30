@@ -1,0 +1,95 @@
+package com.maximpolyakov.quicklink.forge.compat;
+
+import com.maximpolyakov.quicklink.forge.blockentity.ChemicalPlugBlockEntity;
+import com.maximpolyakov.quicklink.forge.blockentity.EnergyPlugBlockEntity;
+import com.maximpolyakov.quicklink.forge.blockentity.FluidPlugBlockEntity;
+import com.maximpolyakov.quicklink.forge.blockentity.ItemPlugBlockEntity;
+import com.maximpolyakov.quicklink.forge.config.QuickLinkConfig;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.ChatFormatting;
+import net.minecraft.world.level.block.entity.BlockEntity;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public final class PlugCompatData {
+
+    public static final String TYPE   = "ql_type";
+    public static final String MAX    = "ql_max";
+    public static final String LAST   = "ql_last";
+    public static final String PERIOD = "ql_period";
+    public static final String TIER   = "ql_tier";
+
+    public static final String ENERGY   = "energy";
+    public static final String FLUID    = "fluid";
+    public static final String ITEM     = "item";
+    public static final String CHEMICAL = "chemical";
+
+    private PlugCompatData() {}
+
+    public static void write(CompoundTag data, BlockEntity be) {
+        if (be instanceof EnergyPlugBlockEntity e) {
+            data.putString(TYPE, ENERGY);
+            data.putLong(MAX, e.effectiveTransferFe());
+            data.putLong(LAST, e.getLastTransferredFe());
+            data.putInt(PERIOD, QuickLinkConfig.ENERGY_TICK_PERIOD.get());
+            data.putInt(TIER, e.getUpgradeTier());
+        } else if (be instanceof FluidPlugBlockEntity f) {
+            data.putString(TYPE, FLUID);
+            data.putLong(MAX, f.effectiveAmountMb());
+            data.putLong(LAST, f.getLastTransferredMb());
+            data.putInt(PERIOD, QuickLinkConfig.FLUID_TICK_PERIOD.get());
+            data.putInt(TIER, f.getUpgradeTier());
+        } else if (be instanceof ItemPlugBlockEntity i) {
+            data.putString(TYPE, ITEM);
+            data.putLong(MAX, i.effectiveMoveBatch());
+            data.putLong(LAST, i.getLastMovedItems());
+            data.putInt(PERIOD, QuickLinkConfig.ITEM_TICK_PERIOD.get());
+            data.putInt(TIER, i.getUpgradeTier());
+        } else if (be instanceof ChemicalPlugBlockEntity c) {
+            data.putString(TYPE, CHEMICAL);
+            data.putLong(MAX, c.effectiveAmountMb());
+            data.putLong(LAST, c.getLastTransferredMb());
+            data.putInt(PERIOD, QuickLinkConfig.CHEMICAL_TICK_PERIOD.get());
+            data.putInt(TIER, c.getUpgradeTier());
+        }
+    }
+
+    public static List<Component> buildTooltip(CompoundTag data) {
+        if (!data.contains(TYPE)) return List.of();
+
+        String type   = data.getString(TYPE);
+        long   max    = data.getLong(MAX);
+        long   last   = data.getLong(LAST);
+        int    period = data.getInt(PERIOD);
+        int    tier   = data.getInt(TIER);
+
+        List<Component> lines = new ArrayList<>();
+
+        if (tier > 0) {
+            int mult = 1 << tier;
+            lines.add(Component.literal("Tier " + tier + "  (x" + mult + ")")
+                    .withStyle(ChatFormatting.GOLD));
+        }
+
+        String unit = switch (type) {
+            case ENERGY   -> "FE";
+            case FLUID, CHEMICAL -> "mB";
+            case ITEM     -> "items";
+            default       -> "";
+        };
+
+        lines.add(Component.literal(String.format("Max:  %,d %s / %d ticks", max, unit, period))
+                .withStyle(ChatFormatting.GRAY));
+
+        if (last > 0) {
+            lines.add(Component.literal(String.format("Last: %,d %s", last, unit))
+                    .withStyle(ChatFormatting.GREEN));
+        } else {
+            lines.add(Component.literal("Idle").withStyle(ChatFormatting.DARK_GRAY));
+        }
+
+        return lines;
+    }
+}

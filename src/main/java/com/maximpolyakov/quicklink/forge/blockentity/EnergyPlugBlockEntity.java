@@ -72,6 +72,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         for (LazyOptional<IEnergyStorage> lo : sideOptionals) lo.invalidate();
     }
 
+    private int lastTransferredFe = 0;
+
     private static int bit(Direction d) { return 1 << d.get3DDataValue(); }
     private static int clampMask6(int m) { return m & 0b111111; }
     static int dirIndex(Direction d) { return Math.max(0, Math.min(5, d.get3DDataValue())); }
@@ -79,6 +81,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     public int getUpgradeTier() { return upgradeTier; }
     public void setUpgradeTier(int tier) { upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER, tier)); setChangedAndSync(); }
     public int effectiveTransferFe() { return QuickLinkConfig.ENERGY_TRANSFER_FE.get() * UpgradeTier.multiplier(upgradeTier); }
+    public int getLastTransferredFe() { return lastTransferredFe; }
+    public int getTickPeriod() { return period; }
 
     public QuickLinkColors getColors(Direction side) { return sideColors[dirIndex(side)]; }
     public void setColors(QuickLinkColors colors) {
@@ -153,7 +157,9 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     public static void serverTick(Level level, BlockPos pos, BlockState state, EnergyPlugBlockEntity be) {
         if (!(level instanceof ServerLevel sl) || !be.enabled) return;
         if ((sl.getGameTime() % period) != 0L) return;
-        for (Direction side : Direction.values()) if (be.isPlugEnabled(side)) be.tryTransferOnce(sl, side, be.effectiveTransferFe());
+        int total = 0;
+        for (Direction side : Direction.values()) if (be.isPlugEnabled(side)) total += be.tryTransferOnce(sl, side, be.effectiveTransferFe());
+        be.lastTransferredFe = total;
     }
 
     @Nullable
@@ -214,8 +220,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         return moved;
     }
 
-    private void tryTransferOnce(ServerLevel sl, Direction plugSide, int amountFE) {
-        IEnergyStorage dst = getAttachedNeighborHandler(plugSide); if (dst == null) return;
+    private int tryTransferOnce(ServerLevel sl, Direction plugSide, int amountFE) {
+        IEnergyStorage dst = getAttachedNeighborHandler(plugSide); if (dst == null) return 0;
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
         int networkKey = getNetworkKey(plugSide);
         record Src(EnergyPlugBlockEntity be, Direction dir) {}
@@ -226,14 +232,16 @@ public class EnergyPlugBlockEntity extends BlockEntity {
             if (!(be instanceof EnergyPlugBlockEntity pBe) || !pBe.enabled) continue;
             for (Direction d : Direction.values()) { if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue; sources.add(new Src(pBe, d)); }
         }
-        if (sources.isEmpty()) return;
+        if (sources.isEmpty()) return 0;
         int pIdx = dirIndex(plugSide), start = rrIndexBySide[pIdx] % sources.size();
         for (int i = 0; i < sources.size(); i++) {
             int idx = (start + i) % sources.size(); Src s = sources.get(idx);
             IEnergyStorage src = s.be().getAttachedNeighborHandler(s.dir()); if (src == null) continue;
-            if (moveEnergy(src, dst, amountFE)) { rrIndexBySide[pIdx] = (idx + 1) % sources.size(); setChanged(); return; }
+            int moved = moveEnergy(src, dst, amountFE);
+            if (moved > 0) { rrIndexBySide[pIdx] = (idx + 1) % sources.size(); setChanged(); return moved; }
         }
         rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size(); setChanged();
+        return 0;
     }
 
     @Nullable
@@ -244,13 +252,13 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         return null;
     }
 
-    private static boolean moveEnergy(IEnergyStorage src, IEnergyStorage dst, int amountFE) {
-        if (amountFE <= 0 || !src.canExtract() || !dst.canReceive()) return false;
-        int canEx = src.extractEnergy(amountFE, true); if (canEx <= 0) return false;
-        int canRx = dst.receiveEnergy(canEx, true); if (canRx <= 0) return false;
-        int toMove = Math.min(canEx, canRx); if (toMove <= 0) return false;
-        int extracted = src.extractEnergy(toMove, false); if (extracted <= 0) return false;
-        return dst.receiveEnergy(extracted, false) > 0;
+    private static int moveEnergy(IEnergyStorage src, IEnergyStorage dst, int amountFE) {
+        if (amountFE <= 0 || !src.canExtract() || !dst.canReceive()) return 0;
+        int canEx = src.extractEnergy(amountFE, true); if (canEx <= 0) return 0;
+        int canRx = dst.receiveEnergy(canEx, true); if (canRx <= 0) return 0;
+        int toMove = Math.min(canEx, canRx); if (toMove <= 0) return 0;
+        int extracted = src.extractEnergy(toMove, false); if (extracted <= 0) return 0;
+        return dst.receiveEnergy(extracted, false);
     }
 
     private static final class SideEnergyStorage implements IEnergyStorage {

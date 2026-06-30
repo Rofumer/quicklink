@@ -74,9 +74,13 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
 
     // ---- upgrade ----
 
+    private long lastTransferredMb = 0;
+
     public int getUpgradeTier() { return upgradeTier; }
     public void setUpgradeTier(int tier) { upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER, tier)); setChangedAndSync(); }
     public long effectiveAmountMb() { return (long) QuickLinkConfig.CHEMICAL_TRANSFER_MB.get() * UpgradeTier.multiplier(upgradeTier); }
+    public long getLastTransferredMb() { return lastTransferredMb; }
+    public int getTickPeriod() { return period; }
 
     // ---- colors / network ----
 
@@ -154,9 +158,11 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
         if (!QuickLinkForge.MEKANISM_LOADED) return;
         if (!(level instanceof ServerLevel sl) || !be.enabled) return;
         if ((sl.getGameTime() % period) != 0L) return;
+        long total = 0;
         for (Direction side : Direction.values()) {
-            if (be.isPlugEnabled(side)) ChemCompatLayer.tryPushToNeighbor(be, sl, side, be.effectiveAmountMb());
+            if (be.isPlugEnabled(side)) total += ChemCompatLayer.tryPushToNeighbor(be, sl, side, be.effectiveAmountMb());
         }
+        be.lastTransferredMb = total;
     }
 
     // ---- NBT ----

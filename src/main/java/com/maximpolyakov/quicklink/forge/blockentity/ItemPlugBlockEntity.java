@@ -91,6 +91,8 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
     // ---- upgrade tier ----
 
+    private int lastMovedItems = 0;
+
     public int getUpgradeTier() { return upgradeTier; }
 
     public void setUpgradeTier(int tier) {
@@ -101,6 +103,9 @@ public class ItemPlugBlockEntity extends BlockEntity {
     public int effectiveMoveBatch() {
         return QuickLinkConfig.ITEM_MOVE_BATCH.get() * UpgradeTier.multiplier(upgradeTier);
     }
+
+    public int getLastMovedItems() { return lastMovedItems; }
+    public int getTickPeriod() { return period; }
 
     // ---- colors / network ----
 
@@ -226,9 +231,11 @@ public class ItemPlugBlockEntity extends BlockEntity {
     public static void serverTick(Level level, BlockPos pos, BlockState state, ItemPlugBlockEntity be) {
         if (!(level instanceof ServerLevel sl) || !be.enabled) return;
         if ((sl.getGameTime() % period) != 0L) return;
+        int total = 0;
         for (Direction side : Direction.values()) {
-            if (be.isPlugEnabled(side)) be.tryPushOnce(sl, side);
+            if (be.isPlugEnabled(side)) total += be.tryPushOnce(sl, side);
         }
+        be.lastMovedItems = total;
     }
 
     @Nullable
@@ -296,9 +303,9 @@ public class ItemPlugBlockEntity extends BlockEntity {
         return ItemStack.EMPTY;
     }
 
-    private void tryPushOnce(ServerLevel sl, Direction plugSide) {
+    private int tryPushOnce(ServerLevel sl, Direction plugSide) {
         IItemHandler dst = getAttachedNeighborHandler(plugSide);
-        if (dst == null) return;
+        if (dst == null) return 0;
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
         int networkKey = getNetworkKey(plugSide);
         record Src(ItemPlugBlockEntity be, Direction dir) {}
@@ -312,15 +319,16 @@ public class ItemPlugBlockEntity extends BlockEntity {
                 sources.add(new Src(pBe, d));
             }
         }
-        if (sources.isEmpty()) return;
+        if (sources.isEmpty()) return 0;
         int pIdx = dirIndex(plugSide), start = rrIndexBySide[pIdx] % sources.size();
         for (int i = 0; i < sources.size(); i++) {
             int idx = (start + i) % sources.size(); Src s = sources.get(idx);
             IItemHandler src = s.be().getAttachedNeighborHandler(s.dir()); if (src == null) continue;
             int moved = moveItems(src, dst, effectiveMoveBatch());
-            if (moved > 0) { rrIndexBySide[pIdx] = (idx + 1) % sources.size(); setChanged(); return; }
+            if (moved > 0) { rrIndexBySide[pIdx] = (idx + 1) % sources.size(); setChanged(); return moved; }
         }
         rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size(); setChanged();
+        return 0;
     }
 
     @Nullable

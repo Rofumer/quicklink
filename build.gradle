@@ -44,11 +44,23 @@ repositories {
         name = 'ModMaven'
         url = 'https://modmaven.dev'
     }
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+    }
+    maven {
+        name = 'Bai Maven'
+        url = 'https://maven.bai.lol'
+    }
 }
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     compileOnly("mekanism:Mekanism:${minecraft_version}-${mekanism_version}:api") { transitive = false }
+    // Jade (hover-tooltip overlay mod, optional at runtime)
+    compileOnly("maven.modrinth:jade:${jade_version}") { transitive = false }
+    // WTHIT (What The Hell Is That, optional at runtime)
+    compileOnly("mcp.mobius.waila:wthit-api:${wthit_api_version}") { transitive = false }
 }
 
 processResources {
