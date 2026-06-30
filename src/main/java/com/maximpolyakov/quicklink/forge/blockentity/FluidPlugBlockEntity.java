@@ -77,13 +77,16 @@ public class FluidPlugBlockEntity extends BlockEntity {
     private static int clampMask6(int m) { return m & 0b111111; }
     static int dirIndex(Direction d) { return Math.max(0, Math.min(5, d.get3DDataValue())); }
 
-    private int lastTransferredMb = 0;
+    private int lastSentMb     = 0;
+    int         pendingReceivedMb = 0;
+    private int lastReceivedMb = 0;
 
     public int getUpgradeTier() { return upgradeTier; }
     public void setUpgradeTier(int tier) { upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER, tier)); setChangedAndSync(); }
     public int effectiveAmountMb() { return QuickLinkConfig.FLUID_TRANSFER_MB.get() * UpgradeTier.multiplier(upgradeTier); }
-    public int getLastTransferredMb() { return lastTransferredMb; }
-    public int getTickPeriod() { return period; }
+    public int getLastSentMb()     { return lastSentMb; }
+    public int getLastReceivedMb() { return lastReceivedMb; }
+    public int getTickPeriod()     { return period; }
     public long effectiveInfiniteMbPerTick() { return (long) QuickLinkConfig.FLUID_INFINITE_MB_PER_TICK.get() * UpgradeTier.multiplier(upgradeTier); }
     public int effectiveInfiniteMaxPush() { return QuickLinkConfig.FLUID_INFINITE_MAX_PUSH_PER_TICK.get() * UpgradeTier.multiplier(upgradeTier); }
 
@@ -166,9 +169,11 @@ public class FluidPlugBlockEntity extends BlockEntity {
     public static void serverTick(Level level, BlockPos pos, BlockState state, FluidPlugBlockEntity be) {
         if (!(level instanceof ServerLevel sl) || !be.enabled) return;
         if ((sl.getGameTime() % period) != 0L) return;
+        be.lastReceivedMb = be.pendingReceivedMb;
+        be.pendingReceivedMb = 0;
         int total = 0;
         for (Direction plugSide : Direction.values()) if (be.isPlugEnabled(plugSide)) total += be.tryTransferOnce(sl, plugSide, be.effectiveAmountMb());
-        be.lastTransferredMb = total;
+        be.lastSentMb = total;
     }
 
     @Nullable
@@ -258,7 +263,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
                 IFluidHandler src = s.be().getCachedNeighborFluidHandler(s.dir()); if (src == null) continue;
                 moved = moveFluidAny(src, dst, amountMB);
             }
-            if (moved > 0) { rrIndexBySide[pIdx] = (idx + 1) % sources.size(); setChanged(); return moved; }
+            if (moved > 0) { rrIndexBySide[pIdx] = (idx + 1) % sources.size(); setChanged(); s.be().pendingReceivedMb += moved; return moved; }
         }
         rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size(); setChanged();
         return 0;

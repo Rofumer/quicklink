@@ -101,6 +101,7 @@ public final class ChemCompatLayer {
             if (moved > 0) {
                 rr[pIdx] = (idx + 1) % sources.size();
                 be.setChanged();
+                s.be().addPendingReceivedMb(moved);
                 return moved;
             }
         }

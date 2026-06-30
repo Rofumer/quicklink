@@ -91,7 +91,9 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
     // ---- upgrade tier ----
 
-    private int lastMovedItems = 0;
+    private int lastSentItems     = 0;
+    int         pendingReceivedItems = 0;
+    private int lastReceivedItems = 0;
 
     public int getUpgradeTier() { return upgradeTier; }
 
@@ -104,8 +106,9 @@ public class ItemPlugBlockEntity extends BlockEntity {
         return QuickLinkConfig.ITEM_MOVE_BATCH.get() * UpgradeTier.multiplier(upgradeTier);
     }
 
-    public int getLastMovedItems() { return lastMovedItems; }
-    public int getTickPeriod() { return period; }
+    public int getLastSentItems()     { return lastSentItems; }
+    public int getLastReceivedItems() { return lastReceivedItems; }
+    public int getTickPeriod()        { return period; }
 
     // ---- colors / network ----
 
@@ -231,11 +234,13 @@ public class ItemPlugBlockEntity extends BlockEntity {
     public static void serverTick(Level level, BlockPos pos, BlockState state, ItemPlugBlockEntity be) {
         if (!(level instanceof ServerLevel sl) || !be.enabled) return;
         if ((sl.getGameTime() % period) != 0L) return;
+        be.lastReceivedItems = be.pendingReceivedItems;
+        be.pendingReceivedItems = 0;
         int total = 0;
         for (Direction side : Direction.values()) {
             if (be.isPlugEnabled(side)) total += be.tryPushOnce(sl, side);
         }
-        be.lastMovedItems = total;
+        be.lastSentItems = total;
     }
 
     @Nullable
@@ -325,7 +330,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
             int idx = (start + i) % sources.size(); Src s = sources.get(idx);
             IItemHandler src = s.be().getAttachedNeighborHandler(s.dir()); if (src == null) continue;
             int moved = moveItems(src, dst, effectiveMoveBatch());
-            if (moved > 0) { rrIndexBySide[pIdx] = (idx + 1) % sources.size(); setChanged(); return moved; }
+            if (moved > 0) { rrIndexBySide[pIdx] = (idx + 1) % sources.size(); setChanged(); s.be().pendingReceivedItems += moved; return moved; }
         }
         rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size(); setChanged();
         return 0;

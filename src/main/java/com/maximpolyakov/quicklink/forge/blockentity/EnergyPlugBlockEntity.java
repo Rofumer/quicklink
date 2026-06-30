@@ -72,7 +72,9 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         for (LazyOptional<IEnergyStorage> lo : sideOptionals) lo.invalidate();
     }
 
-    private int lastTransferredFe = 0;
+    private int lastSentFe     = 0;
+    int         pendingReceivedFe = 0;
+    private int lastReceivedFe = 0;
 
     private static int bit(Direction d) { return 1 << d.get3DDataValue(); }
     private static int clampMask6(int m) { return m & 0b111111; }
@@ -81,8 +83,9 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     public int getUpgradeTier() { return upgradeTier; }
     public void setUpgradeTier(int tier) { upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER, tier)); setChangedAndSync(); }
     public int effectiveTransferFe() { return QuickLinkConfig.ENERGY_TRANSFER_FE.get() * UpgradeTier.multiplier(upgradeTier); }
-    public int getLastTransferredFe() { return lastTransferredFe; }
-    public int getTickPeriod() { return period; }
+    public int getLastSentFe()     { return lastSentFe; }
+    public int getLastReceivedFe() { return lastReceivedFe; }
+    public int getTickPeriod()     { return period; }
 
     public QuickLinkColors getColors(Direction side) { return sideColors[dirIndex(side)]; }
     public void setColors(QuickLinkColors colors) {
@@ -157,9 +160,11 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     public static void serverTick(Level level, BlockPos pos, BlockState state, EnergyPlugBlockEntity be) {
         if (!(level instanceof ServerLevel sl) || !be.enabled) return;
         if ((sl.getGameTime() % period) != 0L) return;
+        be.lastReceivedFe = be.pendingReceivedFe;
+        be.pendingReceivedFe = 0;
         int total = 0;
         for (Direction side : Direction.values()) if (be.isPlugEnabled(side)) total += be.tryTransferOnce(sl, side, be.effectiveTransferFe());
-        be.lastTransferredFe = total;
+        be.lastSentFe = total;
     }
 
     @Nullable
@@ -238,7 +243,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
             int idx = (start + i) % sources.size(); Src s = sources.get(idx);
             IEnergyStorage src = s.be().getAttachedNeighborHandler(s.dir()); if (src == null) continue;
             int moved = moveEnergy(src, dst, amountFE);
-            if (moved > 0) { rrIndexBySide[pIdx] = (idx + 1) % sources.size(); setChanged(); return moved; }
+            if (moved > 0) { rrIndexBySide[pIdx] = (idx + 1) % sources.size(); setChanged(); s.be().pendingReceivedFe += moved; return moved; }
         }
         rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size(); setChanged();
         return 0;

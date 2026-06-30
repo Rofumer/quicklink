@@ -15,11 +15,12 @@ import java.util.List;
 
 public final class PlugCompatData {
 
-    public static final String TYPE   = "ql_type";
-    public static final String MAX    = "ql_max";
-    public static final String LAST   = "ql_last";
-    public static final String PERIOD = "ql_period";
-    public static final String TIER   = "ql_tier";
+    public static final String TYPE      = "ql_type";
+    public static final String MAX       = "ql_max";
+    public static final String LAST_SENT = "ql_sent";
+    public static final String LAST_RECV = "ql_recv";
+    public static final String PERIOD    = "ql_period";
+    public static final String TIER      = "ql_tier";
 
     public static final String ENERGY   = "energy";
     public static final String FLUID    = "fluid";
@@ -31,28 +32,32 @@ public final class PlugCompatData {
     public static void write(CompoundTag data, BlockEntity be) {
         if (be instanceof EnergyPlugBlockEntity e) {
             data.putString(TYPE, ENERGY);
-            data.putLong(MAX, e.effectiveTransferFe());
-            data.putLong(LAST, e.getLastTransferredFe());
+            data.putLong(MAX,       e.effectiveTransferFe());
+            data.putLong(LAST_SENT, e.getLastSentFe());
+            data.putLong(LAST_RECV, e.getLastReceivedFe());
             data.putInt(PERIOD, QuickLinkConfig.ENERGY_TICK_PERIOD.get());
-            data.putInt(TIER, e.getUpgradeTier());
+            data.putInt(TIER,   e.getUpgradeTier());
         } else if (be instanceof FluidPlugBlockEntity f) {
             data.putString(TYPE, FLUID);
-            data.putLong(MAX, f.effectiveAmountMb());
-            data.putLong(LAST, f.getLastTransferredMb());
+            data.putLong(MAX,       f.effectiveAmountMb());
+            data.putLong(LAST_SENT, f.getLastSentMb());
+            data.putLong(LAST_RECV, f.getLastReceivedMb());
             data.putInt(PERIOD, QuickLinkConfig.FLUID_TICK_PERIOD.get());
-            data.putInt(TIER, f.getUpgradeTier());
+            data.putInt(TIER,   f.getUpgradeTier());
         } else if (be instanceof ItemPlugBlockEntity i) {
             data.putString(TYPE, ITEM);
-            data.putLong(MAX, i.effectiveMoveBatch());
-            data.putLong(LAST, i.getLastMovedItems());
+            data.putLong(MAX,       i.effectiveMoveBatch());
+            data.putLong(LAST_SENT, i.getLastSentItems());
+            data.putLong(LAST_RECV, i.getLastReceivedItems());
             data.putInt(PERIOD, QuickLinkConfig.ITEM_TICK_PERIOD.get());
-            data.putInt(TIER, i.getUpgradeTier());
+            data.putInt(TIER,   i.getUpgradeTier());
         } else if (be instanceof ChemicalPlugBlockEntity c) {
             data.putString(TYPE, CHEMICAL);
-            data.putLong(MAX, c.effectiveAmountMb());
-            data.putLong(LAST, c.getLastTransferredMb());
+            data.putLong(MAX,       c.effectiveAmountMb());
+            data.putLong(LAST_SENT, c.getLastSentMb());
+            data.putLong(LAST_RECV, c.getLastReceivedMb());
             data.putInt(PERIOD, QuickLinkConfig.CHEMICAL_TICK_PERIOD.get());
-            data.putInt(TIER, c.getUpgradeTier());
+            data.putInt(TIER,   c.getUpgradeTier());
         }
     }
 
@@ -61,7 +66,8 @@ public final class PlugCompatData {
 
         String type   = data.getString(TYPE);
         long   max    = data.getLong(MAX);
-        long   last   = data.getLong(LAST);
+        long   sent   = data.getLong(LAST_SENT);
+        long   recv   = data.getLong(LAST_RECV);
         int    period = data.getInt(PERIOD);
         int    tier   = data.getInt(TIER);
 
@@ -74,20 +80,26 @@ public final class PlugCompatData {
         }
 
         String unit = switch (type) {
-            case ENERGY   -> "FE";
-            case FLUID, CHEMICAL -> "mB";
-            case ITEM     -> "items";
-            default       -> "";
+            case ENERGY            -> "FE";
+            case FLUID, CHEMICAL   -> "mB";
+            case ITEM              -> "items";
+            default                -> "";
         };
 
         lines.add(Component.literal(String.format("Max:  %,d %s / %d ticks", max, unit, period))
                 .withStyle(ChatFormatting.GRAY));
 
-        if (last > 0) {
-            lines.add(Component.literal(String.format("Last: %,d %s", last, unit))
-                    .withStyle(ChatFormatting.GREEN));
-        } else {
+        if (sent == 0 && recv == 0) {
             lines.add(Component.literal("Idle").withStyle(ChatFormatting.DARK_GRAY));
+        } else {
+            if (sent > 0) {
+                lines.add(Component.literal(String.format("Out:  %,d %s", sent, unit))
+                        .withStyle(ChatFormatting.GREEN));
+            }
+            if (recv > 0) {
+                lines.add(Component.literal(String.format("In:   %,d %s", recv, unit))
+                        .withStyle(ChatFormatting.AQUA));
+            }
         }
 
         return lines;

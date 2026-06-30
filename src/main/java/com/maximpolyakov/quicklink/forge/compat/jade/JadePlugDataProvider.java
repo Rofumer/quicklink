@@ -7,9 +7,14 @@ import snownee.jade.api.BlockAccessor;
 import snownee.jade.api.IServerDataProvider;
 
 public enum JadePlugDataProvider implements IServerDataProvider<BlockAccessor> {
-    INSTANCE;
+    ENERGY  (new ResourceLocation("quicklink", "energy_plug")),
+    FLUID   (new ResourceLocation("quicklink", "fluid_plug")),
+    ITEM    (new ResourceLocation("quicklink", "item_plug")),
+    CHEMICAL(new ResourceLocation("quicklink", "chemical_plug"));
 
-    private static final ResourceLocation UID = new ResourceLocation("quicklink", "plug_info");
+    private final ResourceLocation uid;
+
+    JadePlugDataProvider(ResourceLocation uid) { this.uid = uid; }
 
     @Override
     public void appendServerData(CompoundTag data, BlockAccessor accessor) {
@@ -17,5 +22,5 @@ public enum JadePlugDataProvider implements IServerDataProvider<BlockAccessor> {
     }
 
     @Override
-    public ResourceLocation getUid() { return UID; }
+    public ResourceLocation getUid() { return uid; }
 }
