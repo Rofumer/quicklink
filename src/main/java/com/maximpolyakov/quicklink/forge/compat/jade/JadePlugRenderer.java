@@ -8,15 +8,14 @@ import snownee.jade.api.IBlockComponentProvider;
 import snownee.jade.api.ITooltip;
 import snownee.jade.api.config.IPluginConfig;
 
-public enum JadePlugRenderer implements IBlockComponentProvider {
-    ENERGY  (new ResourceLocation("quicklink", "energy_plug")),
-    FLUID   (new ResourceLocation("quicklink", "fluid_plug")),
-    ITEM    (new ResourceLocation("quicklink", "item_plug")),
-    CHEMICAL(new ResourceLocation("quicklink", "chemical_plug"));
+public final class JadePlugRenderer implements IBlockComponentProvider {
+
+    public static final JadePlugRenderer INSTANCE =
+            new JadePlugRenderer(new ResourceLocation("quicklink", "plug_info"));
 
     private final ResourceLocation uid;
 
-    JadePlugRenderer(ResourceLocation uid) { this.uid = uid; }
+    private JadePlugRenderer(ResourceLocation uid) { this.uid = uid; }
 
     @Override
     public void appendTooltip(ITooltip tooltip, BlockAccessor accessor, IPluginConfig config) {

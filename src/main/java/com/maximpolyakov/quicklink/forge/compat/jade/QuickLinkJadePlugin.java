@@ -19,21 +19,21 @@ public final class QuickLinkJadePlugin implements IWailaPlugin {
 
     @Override
     public void register(IWailaCommonRegistration reg) {
-        reg.registerBlockDataProvider(JadePlugDataProvider.ENERGY,   EnergyPlugBlockEntity.class);
-        reg.registerBlockDataProvider(JadePlugDataProvider.FLUID,    FluidPlugBlockEntity.class);
-        reg.registerBlockDataProvider(JadePlugDataProvider.ITEM,     ItemPlugBlockEntity.class);
+        reg.registerBlockDataProvider(JadePlugDataProvider.INSTANCE, EnergyPlugBlockEntity.class);
+        reg.registerBlockDataProvider(JadePlugDataProvider.INSTANCE, FluidPlugBlockEntity.class);
+        reg.registerBlockDataProvider(JadePlugDataProvider.INSTANCE, ItemPlugBlockEntity.class);
         if (QuickLinkForge.MEKANISM_LOADED) {
-            reg.registerBlockDataProvider(JadePlugDataProvider.CHEMICAL, ChemicalPlugBlockEntity.class);
+            reg.registerBlockDataProvider(JadePlugDataProvider.INSTANCE, ChemicalPlugBlockEntity.class);
         }
     }
 
     @Override
     public void registerClient(IWailaClientRegistration reg) {
-        reg.registerBlockComponent(JadePlugRenderer.ENERGY,   EnergyPlugBlock.class);
-        reg.registerBlockComponent(JadePlugRenderer.FLUID,    FluidPlugBlock.class);
-        reg.registerBlockComponent(JadePlugRenderer.ITEM,     ItemPlugBlock.class);
+        reg.registerBlockComponent(JadePlugRenderer.INSTANCE, EnergyPlugBlock.class);
+        reg.registerBlockComponent(JadePlugRenderer.INSTANCE, FluidPlugBlock.class);
+        reg.registerBlockComponent(JadePlugRenderer.INSTANCE, ItemPlugBlock.class);
         if (QuickLinkForge.MEKANISM_LOADED) {
-            reg.registerBlockComponent(JadePlugRenderer.CHEMICAL, ChemicalPlugBlock.class);
+            reg.registerBlockComponent(JadePlugRenderer.INSTANCE, ChemicalPlugBlock.class);
         }
     }
 }
