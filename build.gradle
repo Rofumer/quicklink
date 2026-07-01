@@ -31,6 +31,28 @@ java {
     withSourcesJar()
 }
 
+repositories {
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+    }
+    maven {
+        name = 'BAI Maven'
+        url = 'https://maven2.bai.lol'
+        content {
+            includeGroup 'lol.bai'
+            includeGroup 'mcp.mobius.waila'
+        }
+    }
+}
+
+dependencies {
+    // Jade (hover-tooltip overlay mod, optional at runtime)
+    compileOnly("maven.modrinth:jade:${rootProject.jade_version}") { transitive = false }
+    // WTHIT (What The Hell Is That, optional at runtime)
+    compileOnly("mcp.mobius.waila:wthit-api:neo-${rootProject.wthit_version}")
+}
+
 neoForge {
     version = project.neoforge_version
 
