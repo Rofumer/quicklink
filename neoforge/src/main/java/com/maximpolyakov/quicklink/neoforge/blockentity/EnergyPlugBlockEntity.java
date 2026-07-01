@@ -68,6 +68,14 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         return QuickLinkConfig.ENERGY_TRANSFER_FE.get() * UpgradeTier.multiplier(upgradeTier);
     }
 
+    private int lastSentFe = 0;
+    int pendingReceivedFe = 0;
+    private int lastReceivedFe = 0;
+
+    public int getLastSentFe() { return lastSentFe; }
+    public int getLastReceivedFe() { return lastReceivedFe; }
+    public int getTickPeriod() { return period; }
+
     public QuickLinkColors getColors(Direction side) { return sideColors[dirIndex(side)]; }
 
     public void setColors(QuickLinkColors colors) {
@@ -233,11 +241,16 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         long gt = sl.getGameTime();
         if ((gt % period) != 0L) return;
 
+        be.lastReceivedFe = be.pendingReceivedFe;
+        be.pendingReceivedFe = 0;
+
+        int total = 0;
         for (Direction side : Direction.values()) {
             if (be.isPlugEnabled(side)) {
-                be.tryTransferOnce(sl, side, be.effectiveTransferFe());
+                total += be.tryTransferOnce(sl, side, be.effectiveTransferFe());
             }
         }
+        be.lastSentFe = total;
     }
 
     @Nullable
@@ -337,9 +350,9 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         return moved;
     }
 
-    private void tryTransferOnce(ServerLevel sl, Direction plugSide, int amountFE) {
+    private int tryTransferOnce(ServerLevel sl, Direction plugSide, int amountFE) {
         IEnergyStorage dst = getAttachedNeighborHandler(plugSide);
-        if (dst == null) return;
+        if (dst == null) return 0;
 
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
         int networkKey = getNetworkKey(plugSide);
@@ -356,7 +369,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
                 sources.add(new Src(pBe, d));
             }
         }
-        if (sources.isEmpty()) return;
+        if (sources.isEmpty()) return 0;
 
         int pIdx = dirIndex(plugSide);
         int start = rrIndexBySide[pIdx] % sources.size();
@@ -367,15 +380,18 @@ public class EnergyPlugBlockEntity extends BlockEntity {
             IEnergyStorage src = s.be().getAttachedNeighborHandler(s.dir());
             if (src == null) continue;
 
-            if (moveEnergy(src, dst, amountFE)) {
+            int moved = moveEnergy(src, dst, amountFE);
+            if (moved > 0) {
                 rrIndexBySide[pIdx] = (idx + 1) % sources.size();
                 setChanged();
-                return;
+                s.be().pendingReceivedFe += moved;
+                return moved;
             }
         }
 
         rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size();
         setChanged();
+        return 0;
     }
 
     @Nullable
@@ -386,23 +402,22 @@ public class EnergyPlugBlockEntity extends BlockEntity {
             : level.getCapability(Capabilities.EnergyStorage.BLOCK, worldPosition.relative(side), side.getOpposite());
     }
 
-    private static boolean moveEnergy(IEnergyStorage src, IEnergyStorage dst, int amountFE) {
-        if (amountFE <= 0 || !src.canExtract() || !dst.canReceive()) return false;
+    private static int moveEnergy(IEnergyStorage src, IEnergyStorage dst, int amountFE) {
+        if (amountFE <= 0 || !src.canExtract() || !dst.canReceive()) return 0;
 
         int canExtract = src.extractEnergy(amountFE, true);
-        if (canExtract <= 0) return false;
+        if (canExtract <= 0) return 0;
 
         int canReceive = dst.receiveEnergy(canExtract, true);
-        if (canReceive <= 0) return false;
+        if (canReceive <= 0) return 0;
 
         int toMove = Math.min(canExtract, canReceive);
-        if (toMove <= 0) return false;
+        if (toMove <= 0) return 0;
 
         int extracted = src.extractEnergy(toMove, false);
-        if (extracted <= 0) return false;
+        if (extracted <= 0) return 0;
 
-        int received = dst.receiveEnergy(extracted, false);
-        return received > 0;
+        return dst.receiveEnergy(extracted, false);
     }
 
     private static final class SideEnergyStorage implements IEnergyStorage {

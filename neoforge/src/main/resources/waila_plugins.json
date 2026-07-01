@@ -1,0 +1,10 @@
+{
+  "quicklink:common": {
+    "initializer": "com.maximpolyakov.quicklink.neoforge.compat.wthit.QuickLinkWthitCommonPlugin",
+    "side": "*"
+  },
+  "quicklink:client": {
+    "initializer": "com.maximpolyakov.quicklink.neoforge.compat.wthit.QuickLinkWthitClientPlugin",
+    "side": "client"
+  }
+}

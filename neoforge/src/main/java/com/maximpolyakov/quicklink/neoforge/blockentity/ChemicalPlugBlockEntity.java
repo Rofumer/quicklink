@@ -68,6 +68,15 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
         return (long) QuickLinkConfig.CHEMICAL_TRANSFER_MB.get() * UpgradeTier.multiplier(upgradeTier);
     }
 
+    private long lastSentMb = 0;
+    long pendingReceivedMb = 0;
+    private long lastReceivedMb = 0;
+
+    public long getLastSentMb() { return lastSentMb; }
+    public long getLastReceivedMb() { return lastReceivedMb; }
+    public void addPendingReceivedMb(long amount) { pendingReceivedMb += amount; }
+    public int getTickPeriod() { return period; }
+
     // ---- public color / network API ----
 
     public QuickLinkColors getColors(Direction side) { return sideColors[dirIndex(side)]; }
@@ -248,11 +257,16 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
         if ((sl.getGameTime() % period) != 0L) return;
         if (!QuickLinkNeoForge.MEKANISM_LOADED) return;
 
+        be.lastReceivedMb = be.pendingReceivedMb;
+        be.pendingReceivedMb = 0;
+
+        long total = 0;
         for (Direction plugSide : Direction.values()) {
             if (be.isPlugEnabled(plugSide)) {
-                ChemCompatLayer.tryPushToNeighbor(be, sl, plugSide, be.effectiveAmountMb());
+                total += ChemCompatLayer.tryPushToNeighbor(be, sl, plugSide, be.effectiveAmountMb());
             }
         }
+        be.lastSentMb = total;
     }
 
     // ---- NBT ----

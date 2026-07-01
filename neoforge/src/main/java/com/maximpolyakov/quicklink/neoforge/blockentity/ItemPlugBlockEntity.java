@@ -90,6 +90,14 @@ public class ItemPlugBlockEntity extends BlockEntity {
         return QuickLinkConfig.ITEM_MOVE_BATCH.get() * UpgradeTier.multiplier(upgradeTier);
     }
 
+    private int lastSentItems = 0;
+    int pendingReceivedItems = 0;
+    private int lastReceivedItems = 0;
+
+    public int getLastSentItems() { return lastSentItems; }
+    public int getLastReceivedItems() { return lastReceivedItems; }
+    public int getTickPeriod() { return period; }
+
     // ------------------------------------------------
     // colors / network
     // ------------------------------------------------
@@ -289,11 +297,16 @@ public class ItemPlugBlockEntity extends BlockEntity {
         //if ((sl.getGameTime() % 10L) != 0L) return;
         if ((gt % period) != 0L) return;
 
+        be.lastReceivedItems = be.pendingReceivedItems;
+        be.pendingReceivedItems = 0;
+
+        int total = 0;
         for (Direction side : Direction.values()) {
             if (be.isPlugEnabled(side)) {
-                be.tryPushOnce(sl, side);
+                total += be.tryPushOnce(sl, side);
             }
         }
+        be.lastSentItems = total;
     }
 
     @Nullable
@@ -385,9 +398,9 @@ public class ItemPlugBlockEntity extends BlockEntity {
         return ItemStack.EMPTY;
     }
 
-    private void tryPushOnce(ServerLevel sl, Direction plugSide) {
+    private int tryPushOnce(ServerLevel sl, Direction plugSide) {
         IItemHandler dst = getAttachedNeighborHandler(plugSide);
-        if (dst == null) return;
+        if (dst == null) return 0;
 
         QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
         int networkKey = getNetworkKey(plugSide);
@@ -404,7 +417,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
                 sources.add(new Src(pBe, d));
             }
         }
-        if (sources.isEmpty()) return;
+        if (sources.isEmpty()) return 0;
 
         int pIdx = dirIndex(plugSide);
         int start = rrIndexBySide[pIdx] % sources.size();
@@ -419,12 +432,14 @@ public class ItemPlugBlockEntity extends BlockEntity {
             if (moved > 0) {
                 rrIndexBySide[pIdx] = (idx + 1) % sources.size();
                 setChanged();
-                return;
+                s.be().pendingReceivedItems += moved;
+                return moved;
             }
         }
 
         rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size();
         setChanged();
+        return 0;
     }
 
     // ------------------------------------------------

@@ -82,16 +82,16 @@ public final class ChemCompatLayer {
 
     // ---- active push (serverTick) ----
 
-    public static boolean tryPushToNeighbor(ChemicalPlugBlockEntity be, ServerLevel sl,
-                                             Direction plugSide, long amount) {
+    public static long tryPushToNeighbor(ChemicalPlugBlockEntity be, ServerLevel sl,
+                                          Direction plugSide, long amount) {
         int networkKey = be.getNetworkKey(plugSide);
 
         BlockPos dstPos  = be.getBlockPos().relative(plugSide);
         Direction dstFace = plugSide.getOpposite();
         BlockEntity dstBe = sl.getBlockEntity(dstPos);
-        if (dstBe instanceof ChemicalPlugBlockEntity) return false;
+        if (dstBe instanceof ChemicalPlugBlockEntity) return 0;
         Object dst = getNeighborHandler(sl, dstPos, dstFace);
-        if (dst == null) return false;
+        if (dst == null) return 0;
 
         QuickLinkChemicalNetworkManager mgr = QuickLinkChemicalNetworkManager.get(sl);
 
@@ -107,7 +107,7 @@ public final class ChemCompatLayer {
                 sources.add(new Src(pBe, d));
             }
         }
-        if (sources.isEmpty()) return false;
+        if (sources.isEmpty()) return 0;
 
         int pIdx = ChemicalPlugBlockEntity.dirIndex(plugSide);
         int[] rr  = be.getRrIndexBySide();
@@ -124,40 +124,42 @@ public final class ChemCompatLayer {
             if (srcBe instanceof ChemicalPlugBlockEntity) continue;
             Object src = getNeighborHandler(srcLevel, srcPos, srcFace);
             if (src == null) continue;
-            if (moveChemicals(src, dst, amount)) {
+            long moved = moveChemicals(src, dst, amount);
+            if (moved > 0) {
                 rr[pIdx] = (idx + 1) % sources.size();
                 be.setChanged();
-                return true;
+                s.be().addPendingReceivedMb(moved);
+                return moved;
             }
         }
 
         rr[pIdx] = (rr[pIdx] + 1) % sources.size();
         be.setChanged();
-        return false;
+        return 0;
     }
 
     // ---- core move primitive ----
 
-    static boolean moveChemicals(Object srcObj, Object dstObj, long amount) {
+    static long moveChemicals(Object srcObj, Object dstObj, long amount) {
         mekanism.api.chemical.IChemicalHandler src = (mekanism.api.chemical.IChemicalHandler) srcObj;
         mekanism.api.chemical.IChemicalHandler dst = (mekanism.api.chemical.IChemicalHandler) dstObj;
 
         mekanism.api.chemical.ChemicalStack canDrain =
             src.extractChemical(amount, mekanism.api.Action.SIMULATE);
-        if (canDrain.isEmpty()) return false;
+        if (canDrain.isEmpty()) return 0;
 
         mekanism.api.chemical.ChemicalStack leftover =
             dst.insertChemical(canDrain, mekanism.api.Action.SIMULATE);
         long insertable = canDrain.getAmount() - leftover.getAmount();
-        if (insertable <= 0) return false;
+        if (insertable <= 0) return 0;
 
         mekanism.api.chemical.ChemicalStack drained =
             src.extractChemical(insertable, mekanism.api.Action.EXECUTE);
-        if (drained.isEmpty()) return false;
+        if (drained.isEmpty()) return 0;
 
         mekanism.api.chemical.ChemicalStack remaining =
             dst.insertChemical(drained, mekanism.api.Action.EXECUTE);
-        return (drained.getAmount() - remaining.getAmount()) > 0;
+        return drained.getAmount() - remaining.getAmount();
     }
 
     // ---- Inner classes — separate class files, loaded lazily by JVM ----

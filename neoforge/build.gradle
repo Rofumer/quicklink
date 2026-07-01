@@ -31,6 +31,18 @@ repositories {
         name = 'ModMaven'
         url = 'https://modmaven.dev'
     }
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+    }
+    maven {
+        name = 'BAI Maven'
+        url = 'https://maven2.bai.lol'
+        content {
+            includeGroup 'lol.bai'
+            includeGroup 'mcp.mobius.waila'
+        }
+    }
 }
 
 dependencies {
@@ -40,6 +52,11 @@ dependencies {
     compileOnly "dev.architectury:architectury-neoforge:$rootProject.architectury_api_version"
 
     compileOnly("mekanism:Mekanism:${rootProject.mekanism_version}:api") { transitive = false }
+
+    // Jade (hover-tooltip overlay mod, optional at runtime)
+    compileOnly("maven.modrinth:jade:${rootProject.jade_version}") { transitive = false }
+    // WTHIT (What The Hell Is That, optional at runtime)
+    compileOnly("mcp.mobius.waila:wthit-api:neo-${rootProject.wthit_version}")
 
     common(project(path: ':common', configuration: 'namedElements')) { transitive false }
     shadowBundle project(path: ':common', configuration: 'transformProductionNeoForge')
