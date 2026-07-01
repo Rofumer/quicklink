@@ -33,6 +33,7 @@ import net.minecraftforge.registries.RegistryObject;
 public final class QuickLinkForge {
 
     public static final boolean MEKANISM_LOADED = ModList.get().isLoaded("mekanism");
+    public static final boolean FTBTEAMS_LOADED = ModList.get().isLoaded("ftbteams");
 
     public static final DeferredRegister<Block> BLOCKS =
             DeferredRegister.create(ForgeRegistries.BLOCKS, QuickLink.MOD_ID);

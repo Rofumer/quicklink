@@ -4,6 +4,7 @@ import com.maximpolyakov.quicklink.QuickLinkColors;
 import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.forge.QuickLinkForge;
 import com.maximpolyakov.quicklink.forge.UpgradeTier;
+import com.maximpolyakov.quicklink.forge.compat.ftbteams.FTBTeamsCompat;
 import com.maximpolyakov.quicklink.forge.config.QuickLinkConfig;
 import com.maximpolyakov.quicklink.forge.network.QuickLinkChemicalNetworkManager;
 import net.minecraft.core.BlockPos;
@@ -20,6 +21,8 @@ import net.minecraftforge.common.util.LazyOptional;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.UUID;
+
 public class ChemicalPlugBlockEntity extends BlockEntity {
 
     static int period = QuickLinkConfig.CHEMICAL_TICK_PERIOD.get();
@@ -32,6 +35,7 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
 
     private final QuickLinkColors[] sideColors = new QuickLinkColors[6];
     private boolean enabled = true;
+    private UUID ownerUUID = null;
 
     private java.util.Set<Integer> lastRegPlugKeys  = new java.util.HashSet<>();
     private java.util.Set<Integer> lastRegPointKeys = new java.util.HashSet<>();
@@ -104,7 +108,17 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
         sideColors[idx] = sideColors[idx].with(slot, colorId); setChangedAndSync();
         if (oldKey != sideColors[idx].networkKey()) syncRegistration();
     }
-    public int getNetworkKey(Direction side) { return sideColors[dirIndex(side)].networkKey(); }
+    public int getNetworkKey(Direction side) {
+        int colorKey = sideColors[dirIndex(side)].networkKey();
+        int teamKey = QuickLinkForge.FTBTEAMS_LOADED ? FTBTeamsCompat.teamComponent(ownerUUID) : 0;
+        return colorKey | (teamKey << 16);
+    }
+
+    public UUID getOwnerUUID() { return ownerUUID; }
+    public void setOwnerUUID(UUID uuid) {
+        ownerUUID = uuid;
+        setChangedAndSync(); syncRegistration();
+    }
 
     // ---- roles ----
 
@@ -181,6 +195,7 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
         tag.putInt("ql_plug_mask", clampMask6(plugMask)); tag.putInt("ql_point_mask", clampMask6(pointMask));
         tag.putInt("ql_disabled_mask", clampMask6(disabledMask)); tag.putIntArray("ql_rr_side", rrIndexBySide);
         tag.putInt(QuickLinkNbt.UPGRADE_TIER, upgradeTier);
+        if (ownerUUID != null) tag.putUUID(QuickLinkNbt.OWNER_UUID, ownerUUID);
     }
 
     @Override
@@ -201,6 +216,7 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
             int[] arr = tag.getIntArray("ql_rr_side"); for (int i = 0; i < 6; i++) rrIndexBySide[i] = (arr != null && arr.length > i) ? Math.max(0, arr[i]) : 0;
         }
         upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER, tag.contains(QuickLinkNbt.UPGRADE_TIER, Tag.TAG_INT) ? tag.getInt(QuickLinkNbt.UPGRADE_TIER) : 0));
+        ownerUUID = tag.hasUUID(QuickLinkNbt.OWNER_UUID) ? tag.getUUID(QuickLinkNbt.OWNER_UUID) : null;
     }
 
     @Override public CompoundTag getUpdateTag() { CompoundTag tag = super.getUpdateTag(); saveAdditional(tag); return tag; }

@@ -128,6 +128,7 @@ public class ItemPlugBlock extends BaseEntityBlock {
         if (level.isClientSide) return;
         BlockEntity be0 = level.getBlockEntity(pos);
         if (!(be0 instanceof ItemPlugBlockEntity be)) return;
+        if (placer instanceof Player player) be.setOwnerUUID(player.getUUID());
         CompoundTag tag = stack.getTag();
         if (tag == null) return;
         if (tag.contains(QuickLinkNbt.SIDE_COLORS)) be.setSideColorsPacked(tag.getIntArray(QuickLinkNbt.SIDE_COLORS));
