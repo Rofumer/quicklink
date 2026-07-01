@@ -136,6 +136,15 @@ Network iteration uses `record Src(BEType be, Direction dir)` so that `s.be().ge
 
 **FluidPlugBE specifics:** `getCachedNeighborFluidHandler(Direction)` checks if the neighbor is itself a `FluidPlugBlockEntity` first (peer-to-peer path), then falls through to the cache. Returns `IFluidHandler.of(rh)` wrapper.
 
+## Jade / WTHIT Tooltip Compat
+
+Optional runtime integrations live in `neoforge/.../compat/`. Both are `compileOnly` deps (see `build.gradle` + `gradle.properties` for `jade_version`/`wthit_version`); the mod loads fine with neither installed.
+
+- `compat/PlugCompatData.java` — reads/writes the shared NBT payload (type, max, last sent/received, tick period, upgrade tier). Each of the three BEs tracks `lastSent*`/`lastReceived*`/`pendingReceived*` fields, populated in `serverTick`.
+- `compat/jade/` — `QuickLinkJadePlugin` (annotated `@WailaPlugin`, plus a `META-INF/services/snownee.jade.api.IWailaPlugin` fallback entry) registers `JadePlugDataProvider` (server) and `JadePlugRenderer` (client tooltip) for all three plug block/BE classes.
+- `compat/wthit/` — registered via `neoforge/src/main/resources/waila_plugins.json` using the **`entrypoints`** schema (`{"quicklink:plugs": {"entrypoints": {"common": ..., "client": ...}, "side": "*"}}`). Do NOT use the deprecated single `"initializer"` key when common/client are split into separate classes — WTHIT silently ClassCastExceptions and drops the plugin (confirmed against the actual `wthit_plugins.json` parser in the runtime jar).
+- Jade/WTHIT API packages use `Identifier` (not `ResourceLocation`) on this branch, matching the rest of the MC 26.1.2 migration.
+
 ## Open Issues
 
 None. Migration to MC 26.1.2 is complete. ItemPlug tested in-game. Fluid and Energy plugs pending full test.

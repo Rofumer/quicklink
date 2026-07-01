@@ -91,6 +91,14 @@ public class FluidPlugBlockEntity extends BlockEntity {
         return QuickLinkConfig.FLUID_TRANSFER_MB.get() * UpgradeTier.multiplier(upgradeTier);
     }
 
+    private int lastSentMb = 0;
+    int pendingReceivedMb = 0;
+    private int lastReceivedMb = 0;
+
+    public int getLastSentMb() { return lastSentMb; }
+    public int getLastReceivedMb() { return lastReceivedMb; }
+    public int getTickPeriod() { return period; }
+
     public long effectiveInfiniteMbPerTick() {
         return (long) QuickLinkConfig.FLUID_INFINITE_MB_PER_TICK.get() * UpgradeTier.multiplier(upgradeTier);
     }
@@ -278,9 +286,15 @@ public class FluidPlugBlockEntity extends BlockEntity {
         if (!be.enabled) return;
         long gt = sl.getGameTime();
         if ((gt % period) != 0L) return;
+
+        be.lastReceivedMb = be.pendingReceivedMb;
+        be.pendingReceivedMb = 0;
+
+        int total = 0;
         for (Direction plugSide : Direction.values()) {
-            if (be.isPlugEnabled(plugSide)) be.tryTransferOnce(sl, plugSide, be.effectiveAmountMb());
+            if (be.isPlugEnabled(plugSide)) total += be.tryTransferOnce(sl, plugSide, be.effectiveAmountMb());
         }
+        be.lastSentMb = total;
     }
 
     @Nullable
@@ -384,10 +398,10 @@ public class FluidPlugBlockEntity extends BlockEntity {
         return FluidStack.EMPTY;
     }
 
-    private void tryTransferOnce(ServerLevel sl, Direction plugSide, int amountMB) {
+    private int tryTransferOnce(ServerLevel sl, Direction plugSide, int amountMB) {
         int networkKey = getNetworkKey(plugSide);
         IFluidHandler dst = getCachedNeighborFluidHandler(plugSide);
-        if (dst == null) return;
+        if (dst == null) return 0;
 
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
 
@@ -403,7 +417,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
                 sources.add(new Src(pBe, d));
             }
         }
-        if (sources.isEmpty()) return;
+        if (sources.isEmpty()) return 0;
 
         int pIdx = dirIndex(plugSide);
         int start = rrIndexBySide[pIdx] % sources.size();
@@ -411,7 +425,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
         for (int i = 0; i < sources.size(); i++) {
             int idx = (start + i) % sources.size();
             Src s = sources.get(idx);
-            boolean moved;
+            int moved;
             if (s.be().isInfiniteWater(s.dir())) {
                 moved = pushInfiniteWater(dst, s.be(), s.dir());
             } else {
@@ -419,28 +433,30 @@ public class FluidPlugBlockEntity extends BlockEntity {
                 if (src == null) continue;
                 moved = moveFluidAny(src, dst, amountMB);
             }
-            if (moved) {
+            if (moved > 0) {
                 rrIndexBySide[pIdx] = (idx + 1) % sources.size();
                 setChanged();
-                return;
+                s.be().pendingReceivedMb += moved;
+                return moved;
             }
         }
 
         rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size();
         setChanged();
+        return 0;
     }
 
-    private static boolean pushInfiniteWater(@Nullable IFluidHandler dst, FluidPlugBlockEntity plugBe, Direction pointSide) {
+    private static int pushInfiniteWater(@Nullable IFluidHandler dst, FluidPlugBlockEntity plugBe, Direction pointSide) {
         int idx = dirIndex(pointSide);
         long rateMb = plugBe.effectiveInfiniteMbPerTick();
         int maxChunk = plugBe.effectiveInfiniteMaxPush();
         plugBe.waterAccumBySide[idx] += rateMb;
 
-        if (dst == null) return false;
+        if (dst == null) return 0;
         FluidStack probe = new FluidStack(Fluids.WATER, 1);
-        if (dst.fill(probe, IFluidHandler.FluidAction.SIMULATE) <= 0) return false;
+        if (dst.fill(probe, IFluidHandler.FluidAction.SIMULATE) <= 0) return 0;
 
-        boolean movedAny = false;
+        int totalMoved = 0;
         for (int i = 0; i < 8; i++) {
             int toMove = (int) Math.min(plugBe.waterAccumBySide[idx], maxChunk);
             if (toMove <= 0) break;
@@ -448,10 +464,10 @@ public class FluidPlugBlockEntity extends BlockEntity {
             int filled = dst.fill(water, IFluidHandler.FluidAction.EXECUTE);
             if (filled <= 0) break;
             plugBe.waterAccumBySide[idx] -= filled;
-            movedAny = true;
+            totalMoved += filled;
         }
-        if (movedAny) plugBe.setChanged();
-        return movedAny;
+        if (totalMoved > 0) plugBe.setChanged();
+        return totalMoved;
     }
 
     @Nullable
@@ -470,22 +486,22 @@ public class FluidPlugBlockEntity extends BlockEntity {
         return rh != null ? IFluidHandler.of(rh) : null;
     }
 
-    private static boolean moveFluidAny(IFluidHandler src, @Nullable IFluidHandler dst, int amountMB) {
-        if (amountMB <= 0 || dst == null) return false;
+    private static int moveFluidAny(IFluidHandler src, @Nullable IFluidHandler dst, int amountMB) {
+        if (amountMB <= 0 || dst == null) return 0;
 
         FluidStack canDrain = src.drain(amountMB, IFluidHandler.FluidAction.SIMULATE);
-        if (canDrain.isEmpty() || canDrain.getAmount() <= 0) return false;
+        if (canDrain.isEmpty() || canDrain.getAmount() <= 0) return 0;
 
         int canFill = dst.fill(canDrain, IFluidHandler.FluidAction.SIMULATE);
-        if (canFill <= 0) return false;
+        if (canFill <= 0) return 0;
 
         int toMove = Math.min(canDrain.getAmount(), canFill);
-        if (toMove <= 0) return false;
+        if (toMove <= 0) return 0;
 
         FluidStack drained = src.drain(toMove, IFluidHandler.FluidAction.EXECUTE);
-        if (drained.isEmpty() || drained.getAmount() <= 0) return false;
+        if (drained.isEmpty() || drained.getAmount() <= 0) return 0;
 
-        return dst.fill(drained, IFluidHandler.FluidAction.EXECUTE) > 0;
+        return dst.fill(drained, IFluidHandler.FluidAction.EXECUTE);
     }
 
     private FluidStack peekNetworkFluid(Direction outputSide) {

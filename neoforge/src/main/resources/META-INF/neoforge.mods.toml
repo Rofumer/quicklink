@@ -27,5 +27,19 @@ versionRange = "[26.1.2,)"
 ordering = "NONE"
 side = "BOTH"
 
+[[dependencies.quicklink]]
+modId = "jade"
+type = "optional"
+versionRange = "[26,)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.quicklink]]
+modId = "wthit"
+type = "optional"
+versionRange = "[12,)"
+ordering = "AFTER"
+side = "BOTH"
+
 [[mixins]]
 config = "quicklink.mixins.json"

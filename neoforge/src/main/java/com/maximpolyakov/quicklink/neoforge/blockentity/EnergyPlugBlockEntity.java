@@ -71,6 +71,14 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         return QuickLinkConfig.ENERGY_TRANSFER_FE.get() * UpgradeTier.multiplier(upgradeTier);
     }
 
+    private int lastSentFe = 0;
+    int pendingReceivedFe = 0;
+    private int lastReceivedFe = 0;
+
+    public int getLastSentFe() { return lastSentFe; }
+    public int getLastReceivedFe() { return lastReceivedFe; }
+    public int getTickPeriod() { return period; }
+
     public QuickLinkColors getColors(Direction side) { return sideColors[dirIndex(side)]; }
 
     public void setColors(QuickLinkColors colors) {
@@ -231,11 +239,16 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         long gt = sl.getGameTime();
         if ((gt % period) != 0L) return;
 
+        be.lastReceivedFe = be.pendingReceivedFe;
+        be.pendingReceivedFe = 0;
+
+        int total = 0;
         for (Direction side : Direction.values()) {
             if (be.isPlugEnabled(side)) {
-                be.tryTransferOnce(sl, side, be.effectiveTransferFe());
+                total += be.tryTransferOnce(sl, side, be.effectiveTransferFe());
             }
         }
+        be.lastSentFe = total;
     }
 
     @Nullable
@@ -331,9 +344,9 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         return moved;
     }
 
-    private void tryTransferOnce(ServerLevel sl, Direction plugSide, int amountFE) {
+    private int tryTransferOnce(ServerLevel sl, Direction plugSide, int amountFE) {
         EnergyHandler dst = getAttachedNeighborHandler(plugSide);
-        if (dst == null) return;
+        if (dst == null) return 0;
 
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
         int networkKey = getNetworkKey(plugSide);
@@ -350,7 +363,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
                 sources.add(new Src(pBe, d));
             }
         }
-        if (sources.isEmpty()) return;
+        if (sources.isEmpty()) return 0;
 
         int pIdx = dirIndex(plugSide);
         int start = rrIndexBySide[pIdx] % sources.size();
@@ -361,15 +374,18 @@ public class EnergyPlugBlockEntity extends BlockEntity {
             EnergyHandler src = s.be().getAttachedNeighborHandler(s.dir());
             if (src == null) continue;
 
-            if (moveEnergy(src, dst, amountFE)) {
+            int moved = moveEnergy(src, dst, amountFE);
+            if (moved > 0) {
                 rrIndexBySide[pIdx] = (idx + 1) % sources.size();
                 setChanged();
-                return;
+                s.be().pendingReceivedFe += moved;
+                return moved;
             }
         }
 
         rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size();
         setChanged();
+        return 0;
     }
 
     @Nullable
@@ -380,15 +396,15 @@ public class EnergyPlugBlockEntity extends BlockEntity {
             : level.getCapability(Capabilities.Energy.BLOCK, worldPosition.relative(side), side.getOpposite());
     }
 
-    private static boolean moveEnergy(EnergyHandler src, EnergyHandler dst, int amountFE) {
-        if (amountFE <= 0) return false;
+    private static int moveEnergy(EnergyHandler src, EnergyHandler dst, int amountFE) {
+        if (amountFE <= 0) return 0;
         try (var tx = Transaction.openRoot()) {
             int canReceive = dst.insert(amountFE, tx);
-            if (canReceive <= 0) return false;
+            if (canReceive <= 0) return 0;
             int extracted = src.extract(canReceive, tx);
-            if (extracted <= 0) return false;
+            if (extracted <= 0) return 0;
             tx.commit();
-            return true;
+            return extracted;
         }
     }
 

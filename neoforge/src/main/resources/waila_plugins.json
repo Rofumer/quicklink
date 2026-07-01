@@ -1,0 +1,9 @@
+{
+  "quicklink:plugs": {
+    "entrypoints": {
+      "common": "com.maximpolyakov.quicklink.neoforge.compat.wthit.QuickLinkWthitCommonPlugin",
+      "client": "com.maximpolyakov.quicklink.neoforge.compat.wthit.QuickLinkWthitClientPlugin"
+    },
+    "side": "*"
+  }
+}
