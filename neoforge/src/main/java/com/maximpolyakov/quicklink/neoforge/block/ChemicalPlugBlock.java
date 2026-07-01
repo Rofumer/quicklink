@@ -149,8 +149,7 @@ public class ChemicalPlugBlock extends BaseEntityBlock {
         double lz = hit.getLocation().z - pos.getZ();
 
         int slot = quadSlotFromHit(face, lx, ly, lz);
-        byte colorId = (byte) dye.getDyeColor().getId();
-        be.setColor(face, slot, colorId);
+        be.setColor(face, slot, (byte) dye.getDyeColor().getId());
 
         return ItemInteractionResult.CONSUME;
     }

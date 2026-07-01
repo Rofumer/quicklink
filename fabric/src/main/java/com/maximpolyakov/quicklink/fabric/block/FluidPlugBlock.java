@@ -138,8 +138,12 @@ public class FluidPlugBlock extends BaseEntityBlock {
         double lz = hit.getLocation().z - pos.getZ();
 
         int slot = quadSlotFromHit(face, lx, ly, lz);
-        byte colorId = (byte) dye.getDyeColor().getId(); // 0..15
-        be.setColor(face, slot, colorId);
+        if (player.isShiftKeyDown()) {
+            be.setColor(face, slot, QuickLinkColors.UNSET);
+            player.sendSystemMessage(Component.literal("Color cleared on side " + face));
+        } else {
+            be.setColor(face, slot, (byte) dye.getDyeColor().getId());
+        }
 
         return ItemInteractionResult.CONSUME;
     }
