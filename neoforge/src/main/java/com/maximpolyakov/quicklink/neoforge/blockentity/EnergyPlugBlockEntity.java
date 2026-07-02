@@ -389,16 +389,12 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     private static boolean moveEnergy(IEnergyStorage src, IEnergyStorage dst, int amountFE) {
         if (amountFE <= 0 || !src.canExtract() || !dst.canReceive()) return false;
 
-        int canExtract = src.extractEnergy(amountFE, true);
-        if (canExtract <= 0) return false;
-
-        int canReceive = dst.receiveEnergy(canExtract, true);
+        // Ask the destination first: some generators (e.g. Thermal Series dynamos) don't honor
+        // extractEnergy(amount, simulate=true) correctly, so we avoid relying on the source's simulate.
+        int canReceive = dst.receiveEnergy(amountFE, true);
         if (canReceive <= 0) return false;
 
-        int toMove = Math.min(canExtract, canReceive);
-        if (toMove <= 0) return false;
-
-        int extracted = src.extractEnergy(toMove, false);
+        int extracted = src.extractEnergy(canReceive, false);
         if (extracted <= 0) return false;
 
         int received = dst.receiveEnergy(extracted, false);
