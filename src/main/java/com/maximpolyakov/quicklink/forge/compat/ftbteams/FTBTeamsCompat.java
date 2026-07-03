@@ -2,6 +2,7 @@ package com.maximpolyakov.quicklink.forge.compat.ftbteams;
 
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Soft-dependency bridge for FTB Teams (Forge 1.20.1).
@@ -13,12 +14,30 @@ public final class FTBTeamsCompat {
 
     private FTBTeamsCompat() {}
 
+    // getNetworkKey() is called uncached, often multiple times per side, inside per-tick
+    // network scans (see EnergyPlugBlockEntity.tryTransferOnce and friends). Team membership
+    // changes are rare, so a short TTL cache turns dozens of FTB Teams API calls per plug
+    // per tick into a single cache hit without meaningfully increasing staleness.
+    private static final long CACHE_TTL_MS = 5000L;
+    private static final ConcurrentHashMap<UUID, CacheEntry> CACHE = new ConcurrentHashMap<>();
+
+    private record CacheEntry(int teamKey, long expiresAtMs) {}
+
     /**
      * Component (0..0xFFFF) identifying the plug owner's effective FTB team
      * (party team if in a party, personal team otherwise), or 0 if unavailable.
      */
     public static int teamComponent(UUID ownerUUID) {
         if (ownerUUID == null) return 0;
+        long now = System.currentTimeMillis();
+        CacheEntry cached = CACHE.get(ownerUUID);
+        if (cached != null && cached.expiresAtMs() > now) return cached.teamKey();
+        int teamKey = resolveTeamComponent(ownerUUID);
+        CACHE.put(ownerUUID, new CacheEntry(teamKey, now + CACHE_TTL_MS));
+        return teamKey;
+    }
+
+    private static int resolveTeamComponent(UUID ownerUUID) {
         try {
             dev.ftb.mods.ftbteams.api.FTBTeamsAPI.API api = dev.ftb.mods.ftbteams.api.FTBTeamsAPI.api();
             if (api == null || !api.isManagerLoaded()) return 0;
