@@ -174,6 +174,8 @@ public class ItemPlugBlock extends BaseEntityBlock {
         BlockEntity be0 = level.getBlockEntity(pos);
         if (!(be0 instanceof ItemPlugBlockEntity be)) return;
 
+        if (placer instanceof Player player) be.setOwnerUUID(player.getUUID());
+
         CustomData customData = stack.get(DataComponents.CUSTOM_DATA);
         if (customData == null) return;
 

@@ -21,6 +21,7 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
+import net.neoforged.fml.ModList;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent;
@@ -30,6 +31,9 @@ import net.neoforged.neoforge.registries.DeferredRegister;
 
 @Mod(QuickLink.MOD_ID)
 public final class QuickLinkNeoForge {
+
+    public static final boolean FTBTEAMS_LOADED = ModList.get().isLoaded("ftbteams");
+    public static final boolean FTBCHUNKS_LOADED = ModList.get().isLoaded("ftbchunks");
 
     public static final DeferredRegister<Block> BLOCKS =
             DeferredRegister.create(Registries.BLOCK, QuickLink.MOD_ID);
