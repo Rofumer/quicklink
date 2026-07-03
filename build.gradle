@@ -44,6 +44,10 @@ repositories {
             includeGroup 'mcp.mobius.waila'
         }
     }
+    maven {
+        name = 'FTB Maven'
+        url = 'https://maven.ftb.dev/releases'
+    }
 }
 
 dependencies {
@@ -51,6 +55,12 @@ dependencies {
     compileOnly("maven.modrinth:jade:${rootProject.jade_version}") { transitive = false }
     // WTHIT (What The Hell Is That, optional at runtime)
     compileOnly("mcp.mobius.waila:wthit-api:neo-${rootProject.wthit_version}")
+    // FTB Teams (team-aware plug networks, optional at runtime)
+    compileOnly("dev.ftb.mods:ftb-teams-neoforge:${rootProject.ftbteams_version}") { transitive = false }
+    // FTB Chunks (claim-aware plug networks, optional at runtime)
+    compileOnly("dev.ftb.mods:ftb-chunks-neoforge:${rootProject.ftbchunks_version}") { transitive = false }
+    // FTB Library (needed for ChunkDimPos type used by the FTB Chunks compat layer)
+    compileOnly("dev.ftb.mods:ftb-library-neoforge:${rootProject.ftblibrary_version}") { transitive = false }
 }
 
 neoForge {

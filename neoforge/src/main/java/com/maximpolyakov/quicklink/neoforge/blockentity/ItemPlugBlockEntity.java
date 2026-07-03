@@ -5,6 +5,8 @@ import com.maximpolyakov.quicklink.neoforge.UpgradeTier;
 import com.maximpolyakov.quicklink.QuickLinkColors;
 import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
+import com.maximpolyakov.quicklink.neoforge.compat.ftbchunks.FTBChunksCompat;
+import com.maximpolyakov.quicklink.neoforge.compat.ftbteams.FTBTeamsCompat;
 import com.maximpolyakov.quicklink.neoforge.network.QuickLinkNetworkManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -48,6 +50,7 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
     private final QuickLinkColors[] sideColors = new QuickLinkColors[6];
     private boolean enabled = true;
+    private java.util.UUID ownerUUID = null;
 
     private java.util.Set<Integer> lastRegPlugKeys = new java.util.HashSet<>();
     private java.util.Set<Integer> lastRegPointKeys = new java.util.HashSet<>();
@@ -134,7 +137,19 @@ public class ItemPlugBlockEntity extends BlockEntity {
     }
 
     public int getNetworkKey(Direction side) {
-        return sideColors[dirIndex(side)].networkKey();
+        int colorKey = sideColors[dirIndex(side)].networkKey();
+        int claimHash = QuickLinkNeoForge.FTBCHUNKS_LOADED ? FTBChunksCompat.claimTeamComponent(level, worldPosition) : FTBChunksCompat.NOT_CLAIMED;
+        int teamKey, claimBit;
+        if (claimHash != FTBChunksCompat.NOT_CLAIMED) { teamKey = claimHash; claimBit = 1; }
+        else { teamKey = QuickLinkNeoForge.FTBTEAMS_LOADED ? FTBTeamsCompat.teamComponent(ownerUUID) : 0; claimBit = 0; }
+        return colorKey | (teamKey << 16) | (claimBit << 31);
+    }
+
+    public java.util.UUID getOwnerUUID() { return ownerUUID; }
+    public void setOwnerUUID(java.util.UUID uuid) {
+        ownerUUID = uuid;
+        setChangedAndSync();
+        syncRegistration();
     }
 
     public void setColor(Direction side, int slot, byte colorId) {
@@ -546,6 +561,10 @@ public class ItemPlugBlockEntity extends BlockEntity {
         output.putInt("ql_disabled_mask", clampMask6(disabledMask));
         output.putIntArray("ql_rr_side", rrIndexBySide);
         output.putInt(QuickLinkNbt.UPGRADE_TIER, upgradeTier);
+        if (ownerUUID != null) {
+            output.putLong(QuickLinkNbt.OWNER_UUID + "_msb", ownerUUID.getMostSignificantBits());
+            output.putLong(QuickLinkNbt.OWNER_UUID + "_lsb", ownerUUID.getLeastSignificantBits());
+        }
     }
 
     @Override
@@ -579,6 +598,10 @@ public class ItemPlugBlockEntity extends BlockEntity {
         }
 
         upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER, input.getIntOr(QuickLinkNbt.UPGRADE_TIER, 0)));
+
+        long ownerMsb = input.getLongOr(QuickLinkNbt.OWNER_UUID + "_msb", 0L);
+        long ownerLsb = input.getLongOr(QuickLinkNbt.OWNER_UUID + "_lsb", 0L);
+        ownerUUID = (ownerMsb != 0L || ownerLsb != 0L) ? new java.util.UUID(ownerMsb, ownerLsb) : null;
     }
 
     @Override
