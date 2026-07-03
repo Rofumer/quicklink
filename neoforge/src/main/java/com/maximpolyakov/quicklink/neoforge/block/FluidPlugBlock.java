@@ -179,6 +179,8 @@ public class FluidPlugBlock extends BaseEntityBlock {
         BlockEntity be0 = level.getBlockEntity(pos);
         if (!(be0 instanceof FluidPlugBlockEntity be)) return;
 
+        if (placer instanceof Player player) be.setOwnerUUID(player.getUUID());
+
         CustomData customData = stack.get(DataComponents.CUSTOM_DATA);
         if (customData == null) return;
 

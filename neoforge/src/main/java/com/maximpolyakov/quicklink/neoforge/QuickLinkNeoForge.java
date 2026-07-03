@@ -37,6 +37,8 @@ public final class QuickLinkNeoForge {
     // Evaluated before ChemCompatLayer is ever referenced, so ChemCompatLayer is only
     // loaded by the JVM when this flag is true (Mekanism is present).
     public static final boolean MEKANISM_LOADED = ModList.get().isLoaded("mekanism");
+    public static final boolean FTBTEAMS_LOADED = ModList.get().isLoaded("ftbteams");
+    public static final boolean FTBCHUNKS_LOADED = ModList.get().isLoaded("ftbchunks");
 
     public static final DeferredRegister<Block> BLOCKS =
             DeferredRegister.create(Registries.BLOCK, QuickLink.MOD_ID);

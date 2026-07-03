@@ -48,6 +48,12 @@ Quick Link adds a lightweight and intuitive wireless item, **fluid**, and **ener
 
 Tested and works alongside **Pipez** and **Mekanism** transport pipes and logistics systems without conflicts.
 
+### FTB Teams / FTB Chunks
+
+* With **FTB Teams** installed, networks additionally require matching team membership, not just matching color.
+* With **FTB Chunks** also installed, blocks placed inside a claimed chunk join the network of the *claim's owning team* instead of the placer's own team, and claim-based networks are always kept separate from non-claim networks — even for the same team.
+* **Warning:** if you install FTB Chunks on an existing world that already used FTB Teams, some existing networks may **split**: blocks that end up inside a claim will separate from teammates' blocks standing outside any claim. This is expected — reassign/repaint sides as needed after installing FTB Chunks.
+
 ## How It Works
 
 1. Craft the Quick Link block.

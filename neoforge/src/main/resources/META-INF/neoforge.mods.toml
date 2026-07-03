@@ -48,3 +48,17 @@ versionRange = "[12,)"
 ordering = "AFTER"
 side = "BOTH"
 
+[[dependencies.quicklink]]
+modId = "ftbteams"
+type = "optional"
+versionRange = "[2101,)"
+ordering = "AFTER"
+side = "BOTH"
+
+[[dependencies.quicklink]]
+modId = "ftbchunks"
+type = "optional"
+versionRange = "[2101,)"
+ordering = "AFTER"
+side = "BOTH"
+

@@ -4,6 +4,8 @@ import com.maximpolyakov.quicklink.QuickLinkColors;
 import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
 import com.maximpolyakov.quicklink.neoforge.UpgradeTier;
+import com.maximpolyakov.quicklink.neoforge.compat.ftbchunks.FTBChunksCompat;
+import com.maximpolyakov.quicklink.neoforge.compat.ftbteams.FTBTeamsCompat;
 import com.maximpolyakov.quicklink.neoforge.config.QuickLinkConfig;
 import com.maximpolyakov.quicklink.neoforge.network.QuickLinkEnergyNetworkManager;
 import net.minecraft.core.BlockPos;
@@ -23,6 +25,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 public class EnergyPlugBlockEntity extends BlockEntity {
 
@@ -37,6 +40,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
     private final QuickLinkColors[] sideColors = new QuickLinkColors[6];
     private boolean enabled = true;
+    private UUID ownerUUID = null;
 
     private java.util.Set<Integer> lastRegPlugKeys = new java.util.HashSet<>();
     private java.util.Set<Integer> lastRegPointKeys = new java.util.HashSet<>();
@@ -69,6 +73,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     }
 
     private int lastSentFe = 0;
+    int pendingSentFe = 0;
     int pendingReceivedFe = 0;
     private int lastReceivedFe = 0;
 
@@ -108,7 +113,20 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         if (oldKey != sideColors[idx].networkKey()) syncRegistration();
     }
 
-    public int getNetworkKey(Direction side) { return sideColors[dirIndex(side)].networkKey(); }
+    public int getNetworkKey(Direction side) {
+        int colorKey = sideColors[dirIndex(side)].networkKey();
+        int claimHash = QuickLinkNeoForge.FTBCHUNKS_LOADED ? FTBChunksCompat.claimTeamComponent(level, worldPosition) : FTBChunksCompat.NOT_CLAIMED;
+        int teamKey, claimBit;
+        if (claimHash != FTBChunksCompat.NOT_CLAIMED) { teamKey = claimHash; claimBit = 1; }
+        else { teamKey = QuickLinkNeoForge.FTBTEAMS_LOADED ? FTBTeamsCompat.teamComponent(ownerUUID) : 0; claimBit = 0; }
+        return colorKey | (teamKey << 16) | (claimBit << 31);
+    }
+
+    public UUID getOwnerUUID() { return ownerUUID; }
+    public void setOwnerUUID(UUID uuid) {
+        ownerUUID = uuid;
+        setChangedAndSync(); syncRegistration();
+    }
 
     public enum SideRole { NONE, PLUG, POINT, BOTH }
 
@@ -243,14 +261,14 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
         be.lastReceivedFe = be.pendingReceivedFe;
         be.pendingReceivedFe = 0;
+        be.lastSentFe = be.pendingSentFe;
+        be.pendingSentFe = 0;
 
-        int total = 0;
         for (Direction side : Direction.values()) {
             if (be.isPlugEnabled(side)) {
-                total += be.tryTransferOnce(sl, side, be.effectiveTransferFe());
+                be.tryTransferOnce(sl, side, be.effectiveTransferFe());
             }
         }
-        be.lastSentFe = total;
     }
 
     @Nullable
@@ -296,6 +314,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
                 if (!simulate) {
                     rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % plugs.size();
                     setChanged();
+                    pendingReceivedFe += accepted;
+                    plugBe.pendingSentFe += accepted;
                 }
 
                 if (left <= 0) break;
@@ -341,6 +361,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
                 if (!simulate) {
                     rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % points.size();
                     setChanged();
+                    pendingSentFe += extracted;
+                    pointBe.pendingReceivedFe += extracted;
                 }
 
                 if (left <= 0) break;
@@ -350,9 +372,9 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         return moved;
     }
 
-    private int tryTransferOnce(ServerLevel sl, Direction plugSide, int amountFE) {
+    private void tryTransferOnce(ServerLevel sl, Direction plugSide, int amountFE) {
         IEnergyStorage dst = getAttachedNeighborHandler(plugSide);
-        if (dst == null) return 0;
+        if (dst == null) return;
 
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
         int networkKey = getNetworkKey(plugSide);
@@ -369,7 +391,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
                 sources.add(new Src(pBe, d));
             }
         }
-        if (sources.isEmpty()) return 0;
+        if (sources.isEmpty()) return;
 
         int pIdx = dirIndex(plugSide);
         int start = rrIndexBySide[pIdx] % sources.size();
@@ -385,13 +407,13 @@ public class EnergyPlugBlockEntity extends BlockEntity {
                 rrIndexBySide[pIdx] = (idx + 1) % sources.size();
                 setChanged();
                 s.be().pendingReceivedFe += moved;
-                return moved;
+                pendingSentFe += moved;
+                return;
             }
         }
 
         rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size();
         setChanged();
-        return 0;
     }
 
     @Nullable
@@ -405,16 +427,12 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     private static int moveEnergy(IEnergyStorage src, IEnergyStorage dst, int amountFE) {
         if (amountFE <= 0 || !src.canExtract() || !dst.canReceive()) return 0;
 
-        int canExtract = src.extractEnergy(amountFE, true);
-        if (canExtract <= 0) return 0;
-
-        int canReceive = dst.receiveEnergy(canExtract, true);
+        // Ask the destination first: some generators (e.g. Thermal Series dynamos) don't honor
+        // extractEnergy(amount, simulate=true) correctly, so we avoid relying on the source's simulate.
+        int canReceive = dst.receiveEnergy(amountFE, true);
         if (canReceive <= 0) return 0;
 
-        int toMove = Math.min(canExtract, canReceive);
-        if (toMove <= 0) return 0;
-
-        int extracted = src.extractEnergy(toMove, false);
+        int extracted = src.extractEnergy(canReceive, false);
         if (extracted <= 0) return 0;
 
         return dst.receiveEnergy(extracted, false);
@@ -472,6 +490,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         tag.putInt("ql_disabled_mask", clampMask6(disabledMask));
         tag.putIntArray("ql_rr_side", rrIndexBySide);
         tag.putInt(QuickLinkNbt.UPGRADE_TIER, upgradeTier);
+        if (ownerUUID != null) tag.putUUID(QuickLinkNbt.OWNER_UUID, ownerUUID);
     }
 
     @Override
@@ -507,6 +526,7 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
         upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER,
                 tag.contains(QuickLinkNbt.UPGRADE_TIER, Tag.TAG_INT) ? tag.getInt(QuickLinkNbt.UPGRADE_TIER) : 0));
+        ownerUUID = tag.hasUUID(QuickLinkNbt.OWNER_UUID) ? tag.getUUID(QuickLinkNbt.OWNER_UUID) : null;
     }
 
     @Override
