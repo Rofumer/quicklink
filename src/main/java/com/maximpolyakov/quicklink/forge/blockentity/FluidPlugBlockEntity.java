@@ -4,6 +4,7 @@ import com.maximpolyakov.quicklink.QuickLinkColors;
 import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.forge.QuickLinkForge;
 import com.maximpolyakov.quicklink.forge.UpgradeTier;
+import com.maximpolyakov.quicklink.forge.compat.ftbchunks.FTBChunksCompat;
 import com.maximpolyakov.quicklink.forge.compat.ftbteams.FTBTeamsCompat;
 import com.maximpolyakov.quicklink.forge.config.QuickLinkConfig;
 import com.maximpolyakov.quicklink.forge.network.QuickLinkFluidNetworkManager;
@@ -106,8 +107,11 @@ public class FluidPlugBlockEntity extends BlockEntity {
     }
     public int getNetworkKey(Direction side) {
         int colorKey = sideColors[dirIndex(side)].networkKey();
-        int teamKey = QuickLinkForge.FTBTEAMS_LOADED ? FTBTeamsCompat.teamComponent(ownerUUID) : 0;
-        return colorKey | (teamKey << 16);
+        int claimHash = QuickLinkForge.FTBCHUNKS_LOADED ? FTBChunksCompat.claimTeamComponent(level, worldPosition) : FTBChunksCompat.NOT_CLAIMED;
+        int teamKey, claimBit;
+        if (claimHash != FTBChunksCompat.NOT_CLAIMED) { teamKey = claimHash; claimBit = 1; }
+        else { teamKey = QuickLinkForge.FTBTEAMS_LOADED ? FTBTeamsCompat.teamComponent(ownerUUID) : 0; claimBit = 0; }
+        return colorKey | (teamKey << 16) | (claimBit << 31);
     }
 
     public UUID getOwnerUUID() { return ownerUUID; }

@@ -24,8 +24,10 @@ public final class FTBTeamsCompat {
     private record CacheEntry(int teamKey, long expiresAtMs) {}
 
     /**
-     * Component (0..0xFFFF) identifying the plug owner's effective FTB team
+     * Component (0..0x7FFF) identifying the plug owner's effective FTB team
      * (party team if in a party, personal team otherwise), or 0 if unavailable.
+     * Capped to 15 bits so callers can reserve the top bit of a 16-bit slot
+     * as a discriminator (e.g. FTBChunksCompat's claim-vs-membership flag).
      */
     public static int teamComponent(UUID ownerUUID) {
         if (ownerUUID == null) return 0;
@@ -37,15 +39,19 @@ public final class FTBTeamsCompat {
         return teamKey;
     }
 
+    /** Hashes an FTB Teams team UUID down to 0..0x7FFF, shared with FTBChunksCompat. */
+    public static int hashTeamId(UUID teamId) {
+        int h = teamId.hashCode();
+        return (h ^ (h >>> 16)) & 0x7FFF;
+    }
+
     private static int resolveTeamComponent(UUID ownerUUID) {
         try {
             dev.ftb.mods.ftbteams.api.FTBTeamsAPI.API api = dev.ftb.mods.ftbteams.api.FTBTeamsAPI.api();
             if (api == null || !api.isManagerLoaded()) return 0;
             Optional<dev.ftb.mods.ftbteams.api.Team> team = api.getManager().getTeamForPlayerID(ownerUUID);
             if (team.isEmpty()) return 0;
-            UUID teamId = team.get().getTeamId();
-            int h = teamId.hashCode();
-            return (h ^ (h >>> 16)) & 0xFFFF;
+            return hashTeamId(team.get().getTeamId());
         } catch (Throwable t) {
             return 0;
         }

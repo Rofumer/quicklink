@@ -53,5 +53,12 @@ versionRange = "[2001,)"
 ordering = "AFTER"
 side = "BOTH"
 
+[[dependencies.quicklink]]
+modId = "ftbchunks"
+mandatory = false
+versionRange = "[2001,)"
+ordering = "AFTER"
+side = "BOTH"
+
 [[mixins]]
 config = "quicklink.mixins.json"

@@ -67,6 +67,10 @@ dependencies {
     compileOnly("mcp.mobius.waila:wthit-api:${wthit_api_version}") { transitive = false }
     // FTB Teams (team-aware plug networks, optional at runtime)
     compileOnly("dev.ftb.mods:ftb-teams-forge:${ftbteams_version}") { transitive = false }
+    // FTB Chunks (claim-aware plug networks, optional at runtime)
+    compileOnly("dev.ftb.mods:ftb-chunks-forge:${ftbchunks_version}") { transitive = false }
+    // FTB Library (needed for ChunkDimPos type used by the FTB Chunks compat layer)
+    compileOnly("dev.ftb.mods:ftb-library-forge:${ftblibrary_version}") { transitive = false }
 }
 
 processResources {
