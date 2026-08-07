@@ -9,7 +9,6 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraftforge.common.capabilities.Capability;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -68,45 +67,44 @@ public final class ChemCompatLayer {
 
         QuickLinkChemicalNetworkManager mgr = QuickLinkChemicalNetworkManager.get(sl);
 
-        record Src(ChemicalPlugBlockEntity be, Direction dir) {}
-        List<Src> sources = new ArrayList<>();
-        for (QuickLinkChemicalNetworkManager.GlobalPosRef ref : mgr.getPointsSnapshot(networkKey)) {
+        List<QuickLinkChemicalNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
+        if (points.isEmpty()) return 0;
+
+        int pIdx = ChemicalPlugBlockEntity.dirIndex(plugSide);
+        int[] rr  = be.getRrIndexBySide();
+        int start = rr[pIdx] % points.size();
+
+        // Resolve points lazily in round-robin order and stop at the first one that moves chemicals.
+        // getBlockEntity() force-loads the target chunk, so collecting every source up front would
+        // load one chunk per network member on every attempt, across every dimension involved.
+        for (int i = 0; i < points.size(); i++) {
+            int idx = (start + i) % points.size();
+            QuickLinkChemicalNetworkManager.GlobalPosRef ref = points.get(idx);
             ServerLevel pl = sl.getServer().getLevel(ref.dimension());
             if (pl == null) continue;
             BlockEntity rawBe = pl.getBlockEntity(ref.pos());
             if (!(rawBe instanceof ChemicalPlugBlockEntity pBe) || !pBe.isEnabled()) continue;
             for (Direction d : Direction.values()) {
                 if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
-                sources.add(new Src(pBe, d));
-            }
-        }
-        if (sources.isEmpty()) return 0;
-
-        int pIdx = ChemicalPlugBlockEntity.dirIndex(plugSide);
-        int[] rr  = be.getRrIndexBySide();
-        int start = rr[pIdx] % sources.size();
-
-        for (int i = 0; i < sources.size(); i++) {
-            int idx = (start + i) % sources.size();
-            Src s = sources.get(idx);
-            BlockPos srcPos  = s.be().getBlockPos().relative(s.dir());
-            Direction srcFace = s.dir().getOpposite();
-            Level srcLevel = s.be().getLevel();
-            if (srcLevel == null) continue;
-            BlockEntity srcBe = srcLevel.getBlockEntity(srcPos);
-            if (srcBe instanceof ChemicalPlugBlockEntity) continue;
-            Object src = getNeighborHandler(srcLevel, srcPos, srcFace);
-            if (src == null) continue;
-            long moved = moveChemicals(src, dst, amount);
-            if (moved > 0) {
-                rr[pIdx] = (idx + 1) % sources.size();
-                be.setChanged();
-                s.be().addPendingReceivedMb(moved);
-                return moved;
+                BlockPos srcPos  = pBe.getBlockPos().relative(d);
+                Direction srcFace = d.getOpposite();
+                Level srcLevel = pBe.getLevel();
+                if (srcLevel == null) continue;
+                BlockEntity srcBe = srcLevel.getBlockEntity(srcPos);
+                if (srcBe instanceof ChemicalPlugBlockEntity) continue;
+                Object src = getNeighborHandler(srcLevel, srcPos, srcFace);
+                if (src == null) continue;
+                long moved = moveChemicals(src, dst, amount);
+                if (moved > 0) {
+                    rr[pIdx] = (idx + 1) % points.size();
+                    be.setChanged();
+                    pBe.addPendingReceivedMb(moved);
+                    return moved;
+                }
             }
         }
 
-        rr[pIdx] = (rr[pIdx] + 1) % sources.size();
+        rr[pIdx] = (rr[pIdx] + 1) % points.size();
         be.setChanged();
         return 0;
     }

@@ -112,10 +112,12 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
     public int getNetworkKey(Direction side) {
         int colorKey = sideColors[dirIndex(side)].networkKey();
         int claimHash = QuickLinkForge.FTBCHUNKS_LOADED ? FTBChunksCompat.claimTeamComponent(level, worldPosition) : FTBChunksCompat.NOT_CLAIMED;
-        int teamKey, claimBit;
-        if (claimHash != FTBChunksCompat.NOT_CLAIMED) { teamKey = claimHash; claimBit = 1; }
-        else { teamKey = QuickLinkForge.FTBTEAMS_LOADED ? FTBTeamsCompat.teamComponent(ownerUUID) : 0; claimBit = 0; }
-        return colorKey | (teamKey << 16) | (claimBit << 31);
+        // See EnergyPlugBlockEntity.getNetworkKey: the claim is what makes a plug survive its
+        // owner leaving the team, and a claim key equals the same team's membership key.
+        int teamKey = (claimHash != FTBChunksCompat.NOT_CLAIMED)
+                ? claimHash
+                : (QuickLinkForge.FTBTEAMS_LOADED ? FTBTeamsCompat.teamComponent(ownerUUID) : 0);
+        return colorKey | (teamKey << 16);
     }
 
     public UUID getOwnerUUID() { return ownerUUID; }
@@ -155,8 +157,13 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
     private void setChangedAndSync() {
         setChanged(); if (level != null && !level.isClientSide) level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
     }
+    // See EnergyPlugBlockEntity: setRemoved() also fires on chunk unload, and unregistering there
+    // would drop the plug from the saved network for good.
+    private boolean unloading = false;
+
+    @Override public void onChunkUnloaded() { unloading = true; super.onChunkUnloaded(); }
     @Override public void onLoad() { super.onLoad(); if (level instanceof ServerLevel) syncRegistration(); }
-    @Override public void setRemoved() { if (level != null && !level.isClientSide) unregisterFromManager(); super.setRemoved(); }
+    @Override public void setRemoved() { if (!unloading && level != null && !level.isClientSide) unregisterFromManager(); super.setRemoved(); }
 
     private void unregisterFromManager() {
         if (!(level instanceof ServerLevel sl)) return;
@@ -199,6 +206,8 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
         tag.putInt("ql_plug_mask", clampMask6(plugMask)); tag.putInt("ql_point_mask", clampMask6(pointMask));
         tag.putInt("ql_disabled_mask", clampMask6(disabledMask)); tag.putIntArray("ql_rr_side", rrIndexBySide);
         tag.putInt(QuickLinkNbt.UPGRADE_TIER, upgradeTier);
+        tag.putIntArray(QuickLinkNbt.REG_PLUG_KEYS,  QuickLinkNbt.packKeys(lastRegPlugKeys));
+        tag.putIntArray(QuickLinkNbt.REG_POINT_KEYS, QuickLinkNbt.packKeys(lastRegPointKeys));
         if (ownerUUID != null) tag.putUUID(QuickLinkNbt.OWNER_UUID, ownerUUID);
     }
 
@@ -220,6 +229,8 @@ public class ChemicalPlugBlockEntity extends BlockEntity {
             int[] arr = tag.getIntArray("ql_rr_side"); for (int i = 0; i < 6; i++) rrIndexBySide[i] = (arr != null && arr.length > i) ? Math.max(0, arr[i]) : 0;
         }
         upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER, tag.contains(QuickLinkNbt.UPGRADE_TIER, Tag.TAG_INT) ? tag.getInt(QuickLinkNbt.UPGRADE_TIER) : 0));
+        lastRegPlugKeys  = QuickLinkNbt.unpackKeys(tag.getIntArray(QuickLinkNbt.REG_PLUG_KEYS));
+        lastRegPointKeys = QuickLinkNbt.unpackKeys(tag.getIntArray(QuickLinkNbt.REG_POINT_KEYS));
         ownerUUID = tag.hasUUID(QuickLinkNbt.OWNER_UUID) ? tag.getUUID(QuickLinkNbt.OWNER_UUID) : null;
     }
 

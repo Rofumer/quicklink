@@ -26,7 +26,6 @@ import net.minecraftforge.fluids.capability.IFluidHandler;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -108,10 +107,12 @@ public class FluidPlugBlockEntity extends BlockEntity {
     public int getNetworkKey(Direction side) {
         int colorKey = sideColors[dirIndex(side)].networkKey();
         int claimHash = QuickLinkForge.FTBCHUNKS_LOADED ? FTBChunksCompat.claimTeamComponent(level, worldPosition) : FTBChunksCompat.NOT_CLAIMED;
-        int teamKey, claimBit;
-        if (claimHash != FTBChunksCompat.NOT_CLAIMED) { teamKey = claimHash; claimBit = 1; }
-        else { teamKey = QuickLinkForge.FTBTEAMS_LOADED ? FTBTeamsCompat.teamComponent(ownerUUID) : 0; claimBit = 0; }
-        return colorKey | (teamKey << 16) | (claimBit << 31);
+        // See EnergyPlugBlockEntity.getNetworkKey: the claim is what makes a plug survive its
+        // owner leaving the team, and a claim key equals the same team's membership key.
+        int teamKey = (claimHash != FTBChunksCompat.NOT_CLAIMED)
+                ? claimHash
+                : (QuickLinkForge.FTBTEAMS_LOADED ? FTBTeamsCompat.teamComponent(ownerUUID) : 0);
+        return colorKey | (teamKey << 16);
     }
 
     public UUID getOwnerUUID() { return ownerUUID; }
@@ -164,8 +165,13 @@ public class FluidPlugBlockEntity extends BlockEntity {
     private void setChangedAndSync() {
         setChanged(); if (level != null && !level.isClientSide) level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
     }
+    // See EnergyPlugBlockEntity: setRemoved() also fires on chunk unload, and unregistering there
+    // would drop the plug from the saved network for good.
+    private boolean unloading = false;
+
+    @Override public void onChunkUnloaded() { unloading = true; super.onChunkUnloaded(); }
     @Override public void onLoad() { super.onLoad(); if (level instanceof ServerLevel) syncRegistration(); }
-    @Override public void setRemoved() { if (level != null && !level.isClientSide) unregisterFromManager(); super.setRemoved(); }
+    @Override public void setRemoved() { if (!unloading && level != null && !level.isClientSide) unregisterFromManager(); super.setRemoved(); }
 
     private void unregisterFromManager() {
         if (!(level instanceof ServerLevel sl)) return;
@@ -261,28 +267,31 @@ public class FluidPlugBlockEntity extends BlockEntity {
         int networkKey = getNetworkKey(plugSide);
         IFluidHandler dst = getCachedNeighborFluidHandler(plugSide); if (dst == null) return 0;
         QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
-        record Src(FluidPlugBlockEntity be, Direction dir) {}
-        List<Src> sources = new ArrayList<>();
-        for (QuickLinkFluidNetworkManager.GlobalPosRef ref : mgr.getPointsSnapshot(networkKey)) {
+        List<QuickLinkFluidNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
+        if (points.isEmpty()) return 0;
+        // Resolve points lazily in round-robin order and stop at the first one that moves fluid.
+        // getBlockEntity() force-loads the target chunk, so collecting every source up front would
+        // load one chunk per network member on every attempt, across every dimension involved.
+        int pIdx = dirIndex(plugSide), start = rrIndexBySide[pIdx] % points.size();
+        for (int i = 0; i < points.size(); i++) {
+            int idx = (start + i) % points.size();
+            QuickLinkFluidNetworkManager.GlobalPosRef ref = points.get(idx);
             ServerLevel pl = sl.getServer().getLevel(ref.dimension()); if (pl == null) continue;
             BlockEntity be = pl.getBlockEntity(ref.pos());
             if (!(be instanceof FluidPlugBlockEntity pBe) || !pBe.enabled) continue;
-            for (Direction d : Direction.values()) { if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue; sources.add(new Src(pBe, d)); }
-        }
-        if (sources.isEmpty()) return 0;
-        int pIdx = dirIndex(plugSide), start = rrIndexBySide[pIdx] % sources.size();
-        for (int i = 0; i < sources.size(); i++) {
-            int idx = (start + i) % sources.size(); Src s = sources.get(idx);
-            int moved;
-            if (s.be().isInfiniteWater(s.dir())) {
-                moved = pushInfiniteWater(dst, s.be(), s.dir());
-            } else {
-                IFluidHandler src = s.be().getCachedNeighborFluidHandler(s.dir()); if (src == null) continue;
-                moved = moveFluidAny(src, dst, amountMB);
+            for (Direction d : Direction.values()) {
+                if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
+                int moved;
+                if (pBe.isInfiniteWater(d)) {
+                    moved = pushInfiniteWater(dst, pBe, d);
+                } else {
+                    IFluidHandler src = pBe.getCachedNeighborFluidHandler(d); if (src == null) continue;
+                    moved = moveFluidAny(src, dst, amountMB);
+                }
+                if (moved > 0) { rrIndexBySide[pIdx] = (idx + 1) % points.size(); setChanged(); pBe.pendingReceivedMb += moved; return moved; }
             }
-            if (moved > 0) { rrIndexBySide[pIdx] = (idx + 1) % sources.size(); setChanged(); s.be().pendingReceivedMb += moved; return moved; }
         }
-        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size(); setChanged();
+        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % points.size(); setChanged();
         return 0;
     }
 
@@ -366,6 +375,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
         tag.putInt("ql_disabled_mask", clampMask6(disabledMask)); tag.putInt("ql_inf_water_mask", clampMask6(infiniteWaterMask));
         tag.putIntArray("ql_rr_side", rrIndexBySide); tag.putLongArray("ql_inf_water_accum", waterAccumBySide);
         tag.putInt(QuickLinkNbt.UPGRADE_TIER, upgradeTier);
+        tag.putIntArray(QuickLinkNbt.REG_PLUG_KEYS,  QuickLinkNbt.packKeys(lastRegPlugKeys));
+        tag.putIntArray(QuickLinkNbt.REG_POINT_KEYS, QuickLinkNbt.packKeys(lastRegPointKeys));
         if (ownerUUID != null) tag.putUUID(QuickLinkNbt.OWNER_UUID, ownerUUID);
     }
 
@@ -392,6 +403,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
         }
         infiniteWaterMask &= pointMask;
         upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER, tag.contains(QuickLinkNbt.UPGRADE_TIER, Tag.TAG_INT) ? tag.getInt(QuickLinkNbt.UPGRADE_TIER) : 0));
+        lastRegPlugKeys  = QuickLinkNbt.unpackKeys(tag.getIntArray(QuickLinkNbt.REG_PLUG_KEYS));
+        lastRegPointKeys = QuickLinkNbt.unpackKeys(tag.getIntArray(QuickLinkNbt.REG_POINT_KEYS));
         ownerUUID = tag.hasUUID(QuickLinkNbt.OWNER_UUID) ? tag.getUUID(QuickLinkNbt.OWNER_UUID) : null;
     }
 

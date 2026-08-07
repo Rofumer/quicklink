@@ -26,8 +26,10 @@ public final class FTBTeamsCompat {
     /**
      * Component (0..0x7FFF) identifying the plug owner's effective FTB team
      * (party team if in a party, personal team otherwise), or 0 if unavailable.
-     * Capped to 15 bits so callers can reserve the top bit of a 16-bit slot
-     * as a discriminator (e.g. FTBChunksCompat's claim-vs-membership flag).
+     * Capped to 15 bits so it fits the 16-bit team slot of a network key without
+     * touching the sign bit. FTBChunksCompat derives claim components with the same
+     * {@link #hashTeamId} function, so a claim and plain membership of one team
+     * deliberately produce the same component and therefore the same network.
      */
     public static int teamComponent(UUID ownerUUID) {
         if (ownerUUID == null) return 0;
