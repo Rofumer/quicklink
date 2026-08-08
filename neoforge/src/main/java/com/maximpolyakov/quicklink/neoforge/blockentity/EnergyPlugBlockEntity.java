@@ -23,7 +23,6 @@ import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.energy.IEnergyStorage;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -116,10 +115,14 @@ public class EnergyPlugBlockEntity extends BlockEntity {
     public int getNetworkKey(Direction side) {
         int colorKey = sideColors[dirIndex(side)].networkKey();
         int claimHash = QuickLinkNeoForge.FTBCHUNKS_LOADED ? FTBChunksCompat.claimTeamComponent(level, worldPosition) : FTBChunksCompat.NOT_CLAIMED;
-        int teamKey, claimBit;
-        if (claimHash != FTBChunksCompat.NOT_CLAIMED) { teamKey = claimHash; claimBit = 1; }
-        else { teamKey = QuickLinkNeoForge.FTBTEAMS_LOADED ? FTBTeamsCompat.teamComponent(ownerUUID) : 0; claimBit = 0; }
-        return colorKey | (teamKey << 16) | (claimBit << 31);
+        // A claimed chunk takes its team from the claim and ignores ownerUUID, so a plug keeps
+        // serving the team even after the player who placed it leaves it. Both sources run the
+        // team UUID through FTBTeamsCompat.hashTeamId, so a claim and plain membership of the same
+        // team produce the same key and therefore one network.
+        int teamKey = (claimHash != FTBChunksCompat.NOT_CLAIMED)
+                ? claimHash
+                : (QuickLinkNeoForge.FTBTEAMS_LOADED ? FTBTeamsCompat.teamComponent(ownerUUID) : 0);
+        return colorKey | (teamKey << 16);
     }
 
     public UUID getOwnerUUID() { return ownerUUID; }
@@ -212,9 +215,21 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         }
     }
 
+    // LevelChunk.clearAllBlockEntities() calls onChunkUnloaded() and then setRemoved() on every
+    // block entity of an unloading chunk, so setRemoved() alone cannot tell a broken block from an
+    // unloaded one. Unregistering on unload drops the plug from the saved network permanently:
+    // nothing ever reloads that chunk, because the network only looks up positions it still knows.
+    private boolean unloading = false;
+
+    @Override
+    public void onChunkUnloaded() {
+        unloading = true;
+        super.onChunkUnloaded();
+    }
+
     @Override
     public void setRemoved() {
-        if (level != null && !level.isClientSide) unregisterFromManager();
+        if (!unloading && level != null && !level.isClientSide) unregisterFromManager();
         super.setRemoved();
     }
 
@@ -379,40 +394,39 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
         int networkKey = getNetworkKey(plugSide);
 
-        record Src(EnergyPlugBlockEntity be, Direction dir) {}
-        List<Src> sources = new ArrayList<>();
-        for (QuickLinkEnergyNetworkManager.GlobalPosRef ref : mgr.getPointsSnapshot(networkKey)) {
+        List<QuickLinkEnergyNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
+        if (points.isEmpty()) return;
+
+        int pIdx = dirIndex(plugSide);
+        int start = rrIndexBySide[pIdx] % points.size();
+
+        // Resolve points lazily in round-robin order and stop at the first one that moves energy.
+        // getBlockEntity() force-loads the target chunk, so collecting every source up front would
+        // load one chunk per network member on every attempt, across every dimension involved.
+        for (int i = 0; i < points.size(); i++) {
+            int idx = (start + i) % points.size();
+            QuickLinkEnergyNetworkManager.GlobalPosRef ref = points.get(idx);
             ServerLevel pl = sl.getServer().getLevel(ref.dimension());
             if (pl == null) continue;
             BlockEntity be = pl.getBlockEntity(ref.pos());
             if (!(be instanceof EnergyPlugBlockEntity pBe) || !pBe.enabled) continue;
             for (Direction d : Direction.values()) {
                 if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
-                sources.add(new Src(pBe, d));
-            }
-        }
-        if (sources.isEmpty()) return;
+                IEnergyStorage src = pBe.getAttachedNeighborHandler(d);
+                if (src == null) continue;
 
-        int pIdx = dirIndex(plugSide);
-        int start = rrIndexBySide[pIdx] % sources.size();
-
-        for (int i = 0; i < sources.size(); i++) {
-            int idx = (start + i) % sources.size();
-            Src s = sources.get(idx);
-            IEnergyStorage src = s.be().getAttachedNeighborHandler(s.dir());
-            if (src == null) continue;
-
-            int moved = moveEnergy(src, dst, amountFE);
-            if (moved > 0) {
-                rrIndexBySide[pIdx] = (idx + 1) % sources.size();
-                setChanged();
-                s.be().pendingReceivedFe += moved;
-                pendingSentFe += moved;
-                return;
+                int moved = moveEnergy(src, dst, amountFE);
+                if (moved > 0) {
+                    rrIndexBySide[pIdx] = (idx + 1) % points.size();
+                    setChanged();
+                    pBe.pendingReceivedFe += moved;
+                    pendingSentFe += moved;
+                    return;
+                }
             }
         }
 
-        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % sources.size();
+        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % points.size();
         setChanged();
     }
 
@@ -490,6 +504,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
         tag.putInt("ql_disabled_mask", clampMask6(disabledMask));
         tag.putIntArray("ql_rr_side", rrIndexBySide);
         tag.putInt(QuickLinkNbt.UPGRADE_TIER, upgradeTier);
+        tag.putIntArray(QuickLinkNbt.REG_PLUG_KEYS, QuickLinkNbt.packKeys(lastRegPlugKeys));
+        tag.putIntArray(QuickLinkNbt.REG_POINT_KEYS, QuickLinkNbt.packKeys(lastRegPointKeys));
         if (ownerUUID != null) tag.putUUID(QuickLinkNbt.OWNER_UUID, ownerUUID);
     }
 
@@ -526,6 +542,8 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
         upgradeTier = Math.max(0, Math.min(UpgradeTier.MAX_TIER,
                 tag.contains(QuickLinkNbt.UPGRADE_TIER, Tag.TAG_INT) ? tag.getInt(QuickLinkNbt.UPGRADE_TIER) : 0));
+        lastRegPlugKeys = QuickLinkNbt.unpackKeys(tag.getIntArray(QuickLinkNbt.REG_PLUG_KEYS));
+        lastRegPointKeys = QuickLinkNbt.unpackKeys(tag.getIntArray(QuickLinkNbt.REG_POINT_KEYS));
         ownerUUID = tag.hasUUID(QuickLinkNbt.OWNER_UUID) ? tag.getUUID(QuickLinkNbt.OWNER_UUID) : null;
     }
 

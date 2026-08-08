@@ -95,10 +95,16 @@ public class QuickLinkEnergyNetworkManager extends SavedData {
         return tag;
     }
 
+    // Network keys written before 1.1.17 reserved bit 31 to keep claim-derived networks apart from
+    // membership-derived ones. getNetworkKey() no longer produces such a key, so those entries can
+    // never be looked up again — loadMap drops them instead of carrying them forever.
+    private static final int LEGACY_CLAIM_BIT = 1 << 31;
+
     public static QuickLinkEnergyNetworkManager load(CompoundTag tag, HolderLookup.Provider registries) {
         QuickLinkEnergyNetworkManager mgr = new QuickLinkEnergyNetworkManager();
         mgr.plugsByKey.putAll(loadMap(tag.getCompound("plugs")));
         mgr.pointsByKey.putAll(loadMap(tag.getCompound("points")));
+        mgr.setDirty(); // persist the load-time pruning above
         return mgr;
     }
 
@@ -128,6 +134,7 @@ public class QuickLinkEnergyNetworkManager extends SavedData {
             } catch (NumberFormatException ignore) {
                 continue;
             }
+            if ((key & LEGACY_CLAIM_BIT) != 0) continue;
 
             ListTag list = root.getList(k, Tag.TAG_COMPOUND);
             HashSet<GlobalPosRef> set = new HashSet<>();

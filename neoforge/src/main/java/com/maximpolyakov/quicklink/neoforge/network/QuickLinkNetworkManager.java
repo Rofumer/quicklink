@@ -103,10 +103,15 @@ public class QuickLinkNetworkManager extends SavedData {
         return tag;
     }
 
+    // See QuickLinkEnergyNetworkManager: keys written before 1.1.17 used bit 31 as a claim flag and
+    // are unreachable now, so loadMap drops them.
+    private static final int LEGACY_CLAIM_BIT = 1 << 31;
+
     public static QuickLinkNetworkManager load(CompoundTag tag, HolderLookup.Provider registries) {
         QuickLinkNetworkManager mgr = new QuickLinkNetworkManager();
         mgr.plugsByKey.putAll(loadMap(tag.getCompound("plugs")));
         mgr.pointsByKey.putAll(loadMap(tag.getCompound("points")));
+        mgr.setDirty(); // persist the load-time pruning above
         return mgr;
     }
 
@@ -136,6 +141,7 @@ public class QuickLinkNetworkManager extends SavedData {
             } catch (NumberFormatException ignore) {
                 continue;
             }
+            if ((key & LEGACY_CLAIM_BIT) != 0) continue;
 
             ListTag list = root.getList(k, Tag.TAG_COMPOUND);
             HashSet<GlobalPosRef> set = new HashSet<>();

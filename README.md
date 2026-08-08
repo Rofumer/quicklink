@@ -51,8 +51,10 @@ Tested and works alongside **Pipez** and **Mekanism** transport pipes and logist
 ### FTB Teams / FTB Chunks
 
 * With **FTB Teams** installed, networks additionally require matching team membership, not just matching color.
-* With **FTB Chunks** also installed, blocks placed inside a claimed chunk join the network of the *claim's owning team* instead of the placer's own team, and claim-based networks are always kept separate from non-claim networks — even for the same team.
-* **Warning:** if you install FTB Chunks on an existing world that already used FTB Teams, some existing networks may **split**: blocks that end up inside a claim will separate from teammates' blocks standing outside any claim. This is expected — reassign/repaint sides as needed after installing FTB Chunks.
+* With **FTB Chunks** also installed, a block inside a claimed chunk takes its network from the *claim's owning team* instead of from whoever placed it. Outside any claim, a block follows its owner's current team.
+* **Why claim:** claiming is how a block becomes the team's permanently. If a player leaves the team, their blocks inside the claim stay in the team network, while their blocks outside any claim drop out of it. The same applies to blocks with no recorded owner, and to blocks placed by guests who are not team members at all.
+* A block placed inside *another* team's claim joins that team's network, not its owner's — check whose claim you are building in.
+* Installing FTB Chunks on an existing world normally changes nothing: blocks inside your own team's claims keep the network they already had. Only blocks sitting inside another team's claim will move.
 
 ## How It Works
 
