@@ -26,13 +26,25 @@ public class QuickLinkNetworkManager extends SavedData {
             Codec.list(GLOBAL_POS_CODEC).xmap(HashSet::new, ArrayList::new)
     );
 
+    // Keys written before 1.1.17 reserved bit 31 as a claim-vs-membership discriminator. getNetworkKey()
+    // never sets it now, so nothing can ever look those entries up again — drop them on load.
+    private static final int LEGACY_CLAIM_BIT = 1 << 31;
+
+    private static void putPruned(Map<Integer, Set<GlobalPosRef>> target, Map<Integer, Set<GlobalPosRef>> src) {
+        for (Map.Entry<Integer, Set<GlobalPosRef>> e : src.entrySet()) {
+            if ((e.getKey() & LEGACY_CLAIM_BIT) != 0) continue;
+            target.put(e.getKey(), e.getValue());
+        }
+    }
+
     static final Codec<QuickLinkNetworkManager> CODEC = RecordCodecBuilder.create(inst -> inst.group(
             NET_MAP_CODEC.fieldOf("plugs").forGetter(m -> m.plugsByKey),
             NET_MAP_CODEC.fieldOf("points").forGetter(m -> m.pointsByKey)
     ).apply(inst, (plugs, points) -> {
         QuickLinkNetworkManager mgr = new QuickLinkNetworkManager();
-        mgr.plugsByKey.putAll(plugs);
-        mgr.pointsByKey.putAll(points);
+        putPruned(mgr.plugsByKey, plugs);
+        putPruned(mgr.pointsByKey, points);
+        mgr.setDirty(); // persist the load-time pruning above
         return mgr;
     }));
 
