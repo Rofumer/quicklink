@@ -7,6 +7,7 @@ import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.forge.QuickLinkForge;
 import com.maximpolyakov.quicklink.forge.compat.ftbchunks.FTBChunksCompat;
 import com.maximpolyakov.quicklink.forge.compat.ftbteams.FTBTeamsCompat;
+import com.maximpolyakov.quicklink.forge.network.NetworkTransferGuard;
 import com.maximpolyakov.quicklink.forge.network.QuickLinkNetworkManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -279,97 +280,128 @@ public class ItemPlugBlockEntity extends BlockEntity {
 
     private int receiveIntoNetwork(Direction inputSide, ItemStack stack, boolean simulate) {
         if (stack.isEmpty() || !isPointEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
-        QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
         int networkKey = getNetworkKey(inputSide);
-        List<QuickLinkNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
-        if (plugs.isEmpty()) return 0;
+        // Already walking this network further up the stack: everything we could hand the items to
+        // is part of the traversal that is asking us to take them. Refuse instead of recursing.
+        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.ITEM, networkKey)) return 0;
+        try {
+            QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
+            List<QuickLinkNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
+            if (plugs.isEmpty()) return 0;
 
-        ItemStack remaining = stack.copy();
-        int moved = 0, start = rrIndexBySide[dirIndex(inputSide)];
-        for (int i = 0; i < plugs.size() && !remaining.isEmpty(); i++) {
-            int idx = (start + i) % plugs.size();
-            QuickLinkNetworkManager.GlobalPosRef ref = plugs.get(idx);
-            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
-            if (plugLevel == null) continue;
-            BlockEntity other = plugLevel.getBlockEntity(ref.pos());
-            if (!(other instanceof ItemPlugBlockEntity plugBe) || !plugBe.enabled) continue;
-            for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
-                IItemHandler dst = plugBe.getAttachedNeighborHandler(plugSide);
-                if (dst == null) continue;
-                ItemStack before = remaining.copy();
-                remaining = insertStack(dst, remaining, simulate);
-                moved += before.getCount() - remaining.getCount();
-                if (before.getCount() != remaining.getCount() && !simulate) {
-                    rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % plugs.size(); setChanged();
+            ItemStack remaining = stack.copy();
+            int moved = 0, start = rrIndexBySide[dirIndex(inputSide)];
+            for (int i = 0; i < plugs.size() && !remaining.isEmpty(); i++) {
+                int idx = (start + i) % plugs.size();
+                QuickLinkNetworkManager.GlobalPosRef ref = plugs.get(idx);
+                ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
+                if (plugLevel == null) continue;
+                BlockEntity other = plugLevel.getBlockEntity(ref.pos());
+                if (!(other instanceof ItemPlugBlockEntity plugBe) || !plugBe.enabled) continue;
+                for (Direction plugSide : Direction.values()) {
+                    if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
+                    // never push straight back out of the side we were filled through
+                    if (plugBe == this && plugSide == inputSide) continue;
+                    IItemHandler dst = plugBe.getAttachedNeighborHandler(plugSide, networkKey);
+                    if (dst == null) continue;
+                    ItemStack before = remaining.copy();
+                    remaining = insertStack(dst, remaining, simulate);
+                    moved += before.getCount() - remaining.getCount();
+                    if (before.getCount() != remaining.getCount() && !simulate) {
+                        rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % plugs.size(); setChanged();
+                    }
+                    if (remaining.isEmpty()) break;
                 }
-                if (remaining.isEmpty()) break;
             }
+            return moved;
+        } finally {
+            NetworkTransferGuard.exit(NetworkTransferGuard.Domain.ITEM, networkKey);
         }
-        return moved;
     }
 
     private ItemStack extractFromNetwork(Direction outputSide, int amount, boolean simulate) {
         if (amount <= 0 || !isPlugEnabled(outputSide) || !(level instanceof ServerLevel sl)) return ItemStack.EMPTY;
-        QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
         int networkKey = getNetworkKey(outputSide);
-        List<QuickLinkNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
-        if (points.isEmpty()) return ItemStack.EMPTY;
-        int start = rrIndexBySide[dirIndex(outputSide)];
-        for (int i = 0; i < points.size(); i++) {
-            int idx = (start + i) % points.size();
-            QuickLinkNetworkManager.GlobalPosRef ref = points.get(idx);
-            ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
-            if (pointLevel == null) continue;
-            BlockEntity other = pointLevel.getBlockEntity(ref.pos());
-            if (!(other instanceof ItemPlugBlockEntity pointBe) || !pointBe.enabled) continue;
-            for (Direction pointSide : Direction.values()) {
-                if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
-                IItemHandler src = pointBe.getAttachedNeighborHandler(pointSide);
-                if (src == null) continue;
-                ItemStack extracted = extractAny(src, amount, simulate);
-                if (extracted.isEmpty()) continue;
-                if (!simulate) { rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % points.size(); setChanged(); }
-                return extracted;
+        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.ITEM, networkKey)) return ItemStack.EMPTY; // see receiveIntoNetwork
+        try {
+            QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
+            List<QuickLinkNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
+            if (points.isEmpty()) return ItemStack.EMPTY;
+            int start = rrIndexBySide[dirIndex(outputSide)];
+            for (int i = 0; i < points.size(); i++) {
+                int idx = (start + i) % points.size();
+                QuickLinkNetworkManager.GlobalPosRef ref = points.get(idx);
+                ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
+                if (pointLevel == null) continue;
+                BlockEntity other = pointLevel.getBlockEntity(ref.pos());
+                if (!(other instanceof ItemPlugBlockEntity pointBe) || !pointBe.enabled) continue;
+                for (Direction pointSide : Direction.values()) {
+                    if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
+                    // never source from the very side that is being extracted
+                    if (pointBe == this && pointSide == outputSide) continue;
+                    IItemHandler src = pointBe.getAttachedNeighborHandler(pointSide, networkKey);
+                    if (src == null) continue;
+                    ItemStack extracted = extractAny(src, amount, simulate);
+                    if (extracted.isEmpty()) continue;
+                    if (!simulate) { rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % points.size(); setChanged(); }
+                    return extracted;
+                }
             }
+            return ItemStack.EMPTY;
+        } finally {
+            NetworkTransferGuard.exit(NetworkTransferGuard.Domain.ITEM, networkKey);
         }
-        return ItemStack.EMPTY;
     }
 
     private int tryPushOnce(ServerLevel sl, Direction plugSide) {
-        IItemHandler dst = getAttachedNeighborHandler(plugSide);
-        if (dst == null) return 0;
-        QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
         int networkKey = getNetworkKey(plugSide);
-        List<QuickLinkNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
-        if (points.isEmpty()) return 0;
-        // Resolve points lazily in round-robin order and stop at the first one that moves items.
-        // getBlockEntity() force-loads the target chunk, so collecting every source up front would
-        // load one chunk per network member on every attempt, across every dimension involved.
-        int pIdx = dirIndex(plugSide), start = rrIndexBySide[pIdx] % points.size();
-        for (int i = 0; i < points.size(); i++) {
-            int idx = (start + i) % points.size();
-            QuickLinkNetworkManager.GlobalPosRef ref = points.get(idx);
-            ServerLevel pl = sl.getServer().getLevel(ref.dimension()); if (pl == null) continue;
-            BlockEntity be = pl.getBlockEntity(ref.pos());
-            if (!(be instanceof ItemPlugBlockEntity pBe) || !pBe.enabled) continue;
-            for (Direction d : Direction.values()) {
-                if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
-                IItemHandler src = pBe.getAttachedNeighborHandler(d); if (src == null) continue;
-                int moved = moveItems(src, dst, effectiveMoveBatch());
-                if (moved > 0) { rrIndexBySide[pIdx] = (idx + 1) % points.size(); setChanged(); pBe.pendingReceivedItems += moved; return moved; }
+        // The tick-driven pull traverses this network as well: guarding it stops the neighbour we
+        // push into from pulling back through us while this call is still on the stack.
+        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.ITEM, networkKey)) return 0;
+        try {
+            IItemHandler dst = getAttachedNeighborHandler(plugSide, networkKey);
+            if (dst == null) return 0;
+            QuickLinkNetworkManager mgr = QuickLinkNetworkManager.get(sl);
+            List<QuickLinkNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
+            if (points.isEmpty()) return 0;
+            // Resolve points lazily in round-robin order and stop at the first one that moves items.
+            // getBlockEntity() force-loads the target chunk, so collecting every source up front would
+            // load one chunk per network member on every attempt, across every dimension involved.
+            int pIdx = dirIndex(plugSide), start = rrIndexBySide[pIdx] % points.size();
+            for (int i = 0; i < points.size(); i++) {
+                int idx = (start + i) % points.size();
+                QuickLinkNetworkManager.GlobalPosRef ref = points.get(idx);
+                ServerLevel pl = sl.getServer().getLevel(ref.dimension()); if (pl == null) continue;
+                BlockEntity be = pl.getBlockEntity(ref.pos());
+                if (!(be instanceof ItemPlugBlockEntity pBe) || !pBe.enabled) continue;
+                for (Direction d : Direction.values()) {
+                    if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
+                    // the side we are pushing into cannot also be the source for that same push
+                    if (pBe == this && d == plugSide) continue;
+                    IItemHandler src = pBe.getAttachedNeighborHandler(d, networkKey); if (src == null) continue;
+                    int moved = moveItems(src, dst, effectiveMoveBatch());
+                    if (moved > 0) { rrIndexBySide[pIdx] = (idx + 1) % points.size(); setChanged(); pBe.pendingReceivedItems += moved; return moved; }
+                }
             }
+            rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % points.size(); setChanged();
+            return 0;
+        } finally {
+            NetworkTransferGuard.exit(NetworkTransferGuard.Domain.ITEM, networkKey);
         }
-        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % points.size(); setChanged();
-        return 0;
     }
 
     @Nullable
-    private IItemHandler getAttachedNeighborHandler(Direction side) {
+    private IItemHandler getAttachedNeighborHandler(Direction side, int excludeNetworkKey) {
         BlockPos target = worldPosition.relative(side);
         Direction targetFace = side.getOpposite();
         BlockEntity be = level.getBlockEntity(target);
-        if (be instanceof ItemPlugBlockEntity plug) return plug.getExternalItemHandler(targetFace);
+        if (be instanceof ItemPlugBlockEntity plug) {
+            // A plug facing us on the network we are already serving is not an endpoint, it is the
+            // same network seen from the other side: routing into it can only come back to us.
+            if (plug.isSideEnabled(targetFace) && plug.getRole(targetFace) != SideRole.NONE
+                    && plug.getNetworkKey(targetFace) == excludeNetworkKey) return null;
+            return plug.getExternalItemHandler(targetFace);
+        }
         if (be != null) {
             IItemHandler h = be.getCapability(ForgeCapabilities.ITEM_HANDLER, targetFace).orElse(null);
             if (h != null) return h;

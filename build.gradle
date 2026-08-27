@@ -40,6 +40,7 @@ minecraft {
 }
 
 repositories {
+    mavenCentral()
     maven {
         name = 'ModMaven'
         url = 'https://modmaven.dev'
@@ -71,6 +72,16 @@ dependencies {
     compileOnly("dev.ftb.mods:ftb-chunks-forge:${ftbchunks_version}") { transitive = false }
     // FTB Library (needed for ChunkDimPos type used by the FTB Chunks compat layer)
     compileOnly("dev.ftb.mods:ftb-library-forge:${ftblibrary_version}") { transitive = false }
+
+    // Unit tests for the plain-Java parts of the mod (no Minecraft classes involved)
+    testImplementation platform("org.junit:junit-bom:${junit_version}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+    testLogging { events 'passed', 'skipped', 'failed' }
 }
 
 processResources {
