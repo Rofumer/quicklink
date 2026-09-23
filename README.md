@@ -67,6 +67,7 @@ Quick Link adds a lightweight and intuitive wireless item, **fluid**, **energy**
 * Improved **Chemical Plug compatibility with Mekanism Pressurized Tubes**
 * Fixed plugs being permanently dropped from their saved network after a chunk unload
 * Fixed stale network entries left behind when a Plug was reloaded
+* Fixed a **crash (StackOverflowError)** when item, fluid or energy plugs of the same network were wired into a loop — a network is now traversed at most once per transfer
 
 ## Main Features
 
@@ -114,6 +115,30 @@ Supports **Item**, **Fluid**, **Energy**, and **Chemical** Plugs.
 4. Set each side as **Plug (output)** or **Point (input)**.
 5. Items, fluids, energy, or chemicals will automatically transfer between linked blocks.
 6. To remove a quadrant color, hold **Shift and right-click it with any dye**.
+
+### Network loops
+
+A plug side is an ordinary capability handler, so a network could be routed back into itself (plug next
+to plug, or through a pipe that leads back to another plug of the same colour/team). That used to
+recurse until the game crashed. Each traversal now claims its network key for the duration of the call
+and refuses re-entry, and a plug never treats a same-network plug -- or the side it was just fed
+through -- as a destination. Item, fluid and energy networks are guarded independently, so a busy
+fluid network never holds up an item transfer.
+
+Chemical plugs were never affected: they expose an inert handler and already skip plugs as both source
+and destination.
+
+To verify by hand on a server (or single-player world), for each of the item, fluid and energy plugs:
+
+1. Place two plugs face to face, paint both with the same colours, and set the touching faces to
+   **BOTH**. Nothing should happen and the log should stay clean; before the fix, feeding either plug
+   crashed the game.
+2. Place plug A next to a full container (side facing it = **POINT**), plug B next to an empty one
+   (side facing it = **PLUG**), same colours. Contents must still move A -> B at the normal rate.
+3. Add plug C on the same network with a pipe running from C's **PLUG** side back into A's **POINT**
+   side. Transfers keep working; the loop through C simply moves nothing.
+4. Repeat 2 with the two plugs in different dimensions, and (for fluids) with an **Infinite Water**
+   point, to confirm the normal paths are unaffected.
 
 ## Design Goals
 

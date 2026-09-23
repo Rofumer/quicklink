@@ -2,6 +2,7 @@ package com.maximpolyakov.quicklink.neoforge.blockentity;
 
 import com.maximpolyakov.quicklink.neoforge.config.QuickLinkConfig;
 import com.maximpolyakov.quicklink.neoforge.UpgradeTier;
+import com.maximpolyakov.quicklink.NetworkTransferGuard;
 import com.maximpolyakov.quicklink.QuickLinkColors;
 import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
@@ -415,100 +416,116 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
     private int fillIntoNetwork(Direction inputSide, FluidStack resource, IFluidHandler.FluidAction action) {
         if (resource.isEmpty() || !isPointEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
-
-        QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
         int networkKey = getNetworkKey(inputSide);
-        List<QuickLinkFluidNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
-        if (points.isEmpty()) return 0;
+        // A plug side is a plain capability handler, so a transfer can be routed back into a
+        // network that is already being walked further down this call stack. Claim the key for
+        // the duration of the call and refuse re-entry instead of recursing until the stack dies.
+        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.FLUID, networkKey)) return 0;
+        try {
+            QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
+            List<QuickLinkFluidNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
+            if (points.isEmpty()) return 0;
 
-        int moved = 0;
-        int left = resource.getAmount();
-        int start = rrIndexBySide[dirIndex(inputSide)];
+            int moved = 0;
+            int left = resource.getAmount();
+            int start = rrIndexBySide[dirIndex(inputSide)];
 
-        for (int i = 0; i < points.size() && left > 0; i++) {
-            int idx = (start + i) % points.size();
-            QuickLinkFluidNetworkManager.GlobalPosRef ref = points.get(idx);
-            ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
-            if (pointLevel == null) continue;
+            for (int i = 0; i < points.size() && left > 0; i++) {
+                int idx = (start + i) % points.size();
+                QuickLinkFluidNetworkManager.GlobalPosRef ref = points.get(idx);
+                ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
+                if (pointLevel == null) continue;
 
-            BlockEntity other = pointLevel.getBlockEntity(ref.pos());
-            if (!(other instanceof FluidPlugBlockEntity pointBe) || !pointBe.enabled) continue;
+                BlockEntity other = pointLevel.getBlockEntity(ref.pos());
+                if (!(other instanceof FluidPlugBlockEntity pointBe) || !pointBe.enabled) continue;
 
-            for (Direction pointSide : Direction.values()) {
-                if (!pointBe.isPlugEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
-                IFluidHandler dst = pointBe.getCachedNeighborFluidHandler(pointSide);
-                if (dst == null) continue;
+                for (Direction pointSide : Direction.values()) {
+                    if (!pointBe.isPlugEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
+                    // never push straight back out of the side we were filled through
+                    if (pointBe == this && pointSide == inputSide) continue;
+                    IFluidHandler dst = pointBe.getCachedNeighborFluidHandler(pointSide, networkKey);
+                    if (dst == null) continue;
 
-                FluidStack toFill = resource.copy();
-                toFill.setAmount(left);
-                int accepted = dst.fill(toFill, action);
-                if (accepted <= 0) continue;
+                    FluidStack toFill = resource.copy();
+                    toFill.setAmount(left);
+                    int accepted = dst.fill(toFill, action);
+                    if (accepted <= 0) continue;
 
-                moved += accepted;
-                left -= accepted;
+                    moved += accepted;
+                    left -= accepted;
 
-                if (action.execute()) {
-                    rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % points.size();
-                    setChanged();
+                    if (action.execute()) {
+                        rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % points.size();
+                        setChanged();
+                    }
+
+                    if (left <= 0) break;
                 }
-
-                if (left <= 0) break;
             }
-        }
 
-        return moved;
+            return moved;
+        } finally {
+            NetworkTransferGuard.exit(NetworkTransferGuard.Domain.FLUID, networkKey);
+        }
     }
 
     private FluidStack drainFromNetwork(Direction outputSide, int amount, @Nullable FluidStack match, IFluidHandler.FluidAction action) {
         if (amount <= 0 || !isPlugEnabled(outputSide) || !(level instanceof ServerLevel sl)) return FluidStack.EMPTY;
-
-        QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
         int networkKey = getNetworkKey(outputSide);
-        List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
-        if (plugs.isEmpty()) return FluidStack.EMPTY;
+        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.FLUID, networkKey)) return FluidStack.EMPTY;
+        try {
+            QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
+            List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
+            if (plugs.isEmpty()) return FluidStack.EMPTY;
 
-        int start = rrIndexBySide[dirIndex(outputSide)];
+            int start = rrIndexBySide[dirIndex(outputSide)];
 
-        for (int i = 0; i < plugs.size(); i++) {
-            int idx = (start + i) % plugs.size();
-            QuickLinkFluidNetworkManager.GlobalPosRef ref = plugs.get(idx);
-            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
-            if (plugLevel == null) continue;
+            for (int i = 0; i < plugs.size(); i++) {
+                int idx = (start + i) % plugs.size();
+                QuickLinkFluidNetworkManager.GlobalPosRef ref = plugs.get(idx);
+                ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
+                if (plugLevel == null) continue;
 
-            BlockEntity other = plugLevel.getBlockEntity(ref.pos());
-            if (!(other instanceof FluidPlugBlockEntity plugBe) || !plugBe.enabled) continue;
+                BlockEntity other = plugLevel.getBlockEntity(ref.pos());
+                if (!(other instanceof FluidPlugBlockEntity plugBe) || !plugBe.enabled) continue;
 
-            for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPointEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
+                for (Direction plugSide : Direction.values()) {
+                    if (!plugBe.isPointEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
 
-                if (plugBe.isInfiniteWater(plugSide)) {
-                    if (match != null && !match.isEmpty() && !match.is(Fluids.WATER)) continue;
+                    // never source from the very side that is being drained
+                    if (plugBe == this && plugSide == outputSide) continue;
 
-                    FluidStack provided = new FluidStack(Fluids.WATER, amount);
+                    if (plugBe.isInfiniteWater(plugSide)) {
+                        if (match != null && !match.isEmpty() && !match.is(Fluids.WATER)) continue;
+
+                        FluidStack provided = new FluidStack(Fluids.WATER, amount);
+                        if (action.execute()) {
+                            rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % plugs.size();
+                            setChanged();
+                        }
+                        return provided;
+                    }
+
+                    IFluidHandler src = plugBe.getCachedNeighborFluidHandler(plugSide, networkKey);
+                    if (src == null) continue;
+
+                    FluidStack drained = (match == null)
+                            ? src.drain(amount, action)
+                            : src.drain(match.copyWithAmount(amount), action);
+                    if (drained.isEmpty()) continue;
+
                     if (action.execute()) {
                         rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % plugs.size();
                         setChanged();
                     }
-                    return provided;
+                    return drained;
                 }
-
-                IFluidHandler src = plugBe.getCachedNeighborFluidHandler(plugSide);
-                if (src == null) continue;
-
-                FluidStack drained = (match == null)
-                        ? src.drain(amount, action)
-                        : src.drain(match.copyWithAmount(amount), action);
-                if (drained.isEmpty()) continue;
-
-                if (action.execute()) {
-                    rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % plugs.size();
-                    setChanged();
-                }
-                return drained;
             }
-        }
 
-        return FluidStack.EMPTY;
+            return FluidStack.EMPTY;
+        } finally {
+            NetworkTransferGuard.exit(NetworkTransferGuard.Domain.FLUID, networkKey);
+        }
     }
 
     /**
@@ -517,50 +534,56 @@ public class FluidPlugBlockEntity extends BlockEntity {
      */
     private int tryTransferOnce(ServerLevel sl, Direction plugSide, int amountMB) {
         int networkKey = getNetworkKey(plugSide);
+        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.FLUID, networkKey)) return 0;
+        try {
+            IFluidHandler dst = getCachedNeighborFluidHandler(plugSide, networkKey);
+            if (dst == null) return 0;
 
-        IFluidHandler dst = getCachedNeighborFluidHandler(plugSide);
-        if (dst == null) return 0;
+            QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
 
-        QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
+            List<QuickLinkFluidNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
+            if (points.isEmpty()) return 0;
 
-        List<QuickLinkFluidNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
-        if (points.isEmpty()) return 0;
+            int pIdx = dirIndex(plugSide);
+            int start = rrIndexBySide[pIdx] % points.size();
 
-        int pIdx = dirIndex(plugSide);
-        int start = rrIndexBySide[pIdx] % points.size();
-
-        // Resolve points lazily in round-robin order and stop at the first one that moves fluid.
-        // getBlockEntity() force-loads the target chunk, so collecting every source up front would
-        // load one chunk per network member on every attempt, across every dimension involved.
-        for (int i = 0; i < points.size(); i++) {
-            int idx = (start + i) % points.size();
-            QuickLinkFluidNetworkManager.GlobalPosRef ref = points.get(idx);
-            ServerLevel pl = sl.getServer().getLevel(ref.dimension());
-            if (pl == null) continue;
-            BlockEntity be = pl.getBlockEntity(ref.pos());
-            if (!(be instanceof FluidPlugBlockEntity pBe) || !pBe.enabled) continue;
-            for (Direction d : Direction.values()) {
-                if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
-                int moved;
-                if (pBe.isInfiniteWater(d)) {
-                    moved = pushInfiniteWater(dst, pBe, d);
-                } else {
-                    IFluidHandler src = pBe.getCachedNeighborFluidHandler(d);
-                    if (src == null) continue;
-                    moved = moveFluidAny(src, dst, amountMB);
-                }
-                if (moved > 0) {
-                    rrIndexBySide[pIdx] = (idx + 1) % points.size();
-                    setChanged();
-                    pBe.pendingReceivedMb += moved;
-                    return moved;
+            // Resolve points lazily in round-robin order and stop at the first one that moves fluid.
+            // getBlockEntity() force-loads the target chunk, so collecting every source up front would
+            // load one chunk per network member on every attempt, across every dimension involved.
+            for (int i = 0; i < points.size(); i++) {
+                int idx = (start + i) % points.size();
+                QuickLinkFluidNetworkManager.GlobalPosRef ref = points.get(idx);
+                ServerLevel pl = sl.getServer().getLevel(ref.dimension());
+                if (pl == null) continue;
+                BlockEntity be = pl.getBlockEntity(ref.pos());
+                if (!(be instanceof FluidPlugBlockEntity pBe) || !pBe.enabled) continue;
+                for (Direction d : Direction.values()) {
+                    if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
+                    // the side we are filling cannot also be the source for that same fill
+                    if (pBe == this && d == plugSide) continue;
+                    int moved;
+                    if (pBe.isInfiniteWater(d)) {
+                        moved = pushInfiniteWater(dst, pBe, d);
+                    } else {
+                        IFluidHandler src = pBe.getCachedNeighborFluidHandler(d, networkKey);
+                        if (src == null) continue;
+                        moved = moveFluidAny(src, dst, amountMB);
+                    }
+                    if (moved > 0) {
+                        rrIndexBySide[pIdx] = (idx + 1) % points.size();
+                        setChanged();
+                        pBe.pendingReceivedMb += moved;
+                        return moved;
+                    }
                 }
             }
-        }
 
-        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % points.size();
-        setChanged();
-        return 0;
+            rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % points.size();
+            setChanged();
+            return 0;
+        } finally {
+            NetworkTransferGuard.exit(NetworkTransferGuard.Domain.FLUID, networkKey);
+        }
     }
 
     private static int pushInfiniteWater(@Nullable IFluidHandler dst, FluidPlugBlockEntity plugBe, Direction pointSide) {
@@ -596,11 +619,15 @@ public class FluidPlugBlockEntity extends BlockEntity {
     }
 
     @Nullable
-    private IFluidHandler getCachedNeighborFluidHandler(Direction side) {
+    private IFluidHandler getCachedNeighborFluidHandler(Direction side, int excludeNetworkKey) {
         BlockPos target = worldPosition.relative(side);
         Direction targetFace = side.getOpposite();
         BlockEntity be = level.getBlockEntity(target);
         if (be instanceof FluidPlugBlockEntity plug) {
+            // A plug facing us on the network we are already serving is not an endpoint, it is the
+            // same network seen from the other side: routing into it can only come back to us.
+            if (plug.isSideEnabled(targetFace) && plug.getRole(targetFace) != SideRole.NONE
+                    && plug.getNetworkKey(targetFace) == excludeNetworkKey) return null;
             return plug.getExternalFluidHandler(targetFace);
         }
         BlockCapabilityCache<IFluidHandler, Direction> cache = neighborCaches[dirIndex(side)];
@@ -679,35 +706,41 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
     private FluidStack peekNetworkFluid(Direction outputSide) {
         if (!isPlugEnabled(outputSide) || !(level instanceof ServerLevel sl)) return FluidStack.EMPTY;
-
-        QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
         int networkKey = getNetworkKey(outputSide);
-        List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
-        if (plugs.isEmpty()) return FluidStack.EMPTY;
+        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.FLUID, networkKey)) return FluidStack.EMPTY;
+        try {
+            QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
+            List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
+            if (plugs.isEmpty()) return FluidStack.EMPTY;
 
-        for (QuickLinkFluidNetworkManager.GlobalPosRef ref : plugs) {
-            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
-            if (plugLevel == null) continue;
+            for (QuickLinkFluidNetworkManager.GlobalPosRef ref : plugs) {
+                ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
+                if (plugLevel == null) continue;
 
-            BlockEntity other = plugLevel.getBlockEntity(ref.pos());
-            if (!(other instanceof FluidPlugBlockEntity plugBe) || !plugBe.enabled) continue;
+                BlockEntity other = plugLevel.getBlockEntity(ref.pos());
+                if (!(other instanceof FluidPlugBlockEntity plugBe) || !plugBe.enabled) continue;
 
-            for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPointEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
+                for (Direction plugSide : Direction.values()) {
+                    if (!plugBe.isPointEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
 
-                if (plugBe.isInfiniteWater(plugSide)) {
-                    return new FluidStack(Fluids.WATER, 1);
+                    if (plugBe == this && plugSide == outputSide) continue;
+
+                    if (plugBe.isInfiniteWater(plugSide)) {
+                        return new FluidStack(Fluids.WATER, 1);
+                    }
+
+                    IFluidHandler src = plugBe.getCachedNeighborFluidHandler(plugSide, networkKey);
+                    if (src == null) continue;
+
+                    FluidStack simulated = src.drain(1, IFluidHandler.FluidAction.SIMULATE);
+                    if (!simulated.isEmpty()) return simulated;
                 }
-
-                IFluidHandler src = plugBe.getCachedNeighborFluidHandler(plugSide);
-                if (src == null) continue;
-
-                FluidStack simulated = src.drain(1, IFluidHandler.FluidAction.SIMULATE);
-                if (!simulated.isEmpty()) return simulated;
             }
-        }
 
-        return FluidStack.EMPTY;
+            return FluidStack.EMPTY;
+        } finally {
+            NetworkTransferGuard.exit(NetworkTransferGuard.Domain.FLUID, networkKey);
+        }
     }
 
     // ---------------- NBT ----------------

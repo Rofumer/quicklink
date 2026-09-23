@@ -1,5 +1,6 @@
 package com.maximpolyakov.quicklink.neoforge.blockentity;
 
+import com.maximpolyakov.quicklink.NetworkTransferGuard;
 import com.maximpolyakov.quicklink.QuickLinkColors;
 import com.maximpolyakov.quicklink.QuickLinkNbt;
 import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
@@ -296,146 +297,177 @@ public class EnergyPlugBlockEntity extends BlockEntity {
 
     private int receiveIntoNetwork(Direction inputSide, int amount, boolean simulate) {
         if (amount <= 0 || !isPointEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
-
-        QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
         int networkKey = getNetworkKey(inputSide);
-        List<QuickLinkEnergyNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
-        if (plugs.isEmpty()) return 0;
+        // A plug side is a plain capability handler, so a transfer can be routed back into a
+        // network that is already being walked further down this call stack. Claim the key for
+        // the duration of the call and refuse re-entry instead of recursing until the stack dies.
+        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.ENERGY, networkKey)) return 0;
+        try {
+            QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
+            List<QuickLinkEnergyNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
+            if (plugs.isEmpty()) return 0;
 
-        int moved = 0;
-        int left = amount;
-        int start = rrIndexBySide[dirIndex(inputSide)];
+            int moved = 0;
+            int left = amount;
+            int start = rrIndexBySide[dirIndex(inputSide)];
 
-        for (int i = 0; i < plugs.size() && left > 0; i++) {
-            int idx = (start + i) % plugs.size();
-            QuickLinkEnergyNetworkManager.GlobalPosRef ref = plugs.get(idx);
-            ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
-            if (plugLevel == null) continue;
+            for (int i = 0; i < plugs.size() && left > 0; i++) {
+                int idx = (start + i) % plugs.size();
+                QuickLinkEnergyNetworkManager.GlobalPosRef ref = plugs.get(idx);
+                ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
+                if (plugLevel == null) continue;
 
-            BlockEntity other = plugLevel.getBlockEntity(ref.pos());
-            if (!(other instanceof EnergyPlugBlockEntity plugBe) || !plugBe.enabled) continue;
+                BlockEntity other = plugLevel.getBlockEntity(ref.pos());
+                if (!(other instanceof EnergyPlugBlockEntity plugBe) || !plugBe.enabled) continue;
 
-            for (Direction plugSide : Direction.values()) {
-                if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
-                IEnergyStorage dst = plugBe.getAttachedNeighborHandler(plugSide);
-                if (dst == null || !dst.canReceive()) continue;
+                for (Direction plugSide : Direction.values()) {
+                    if (!plugBe.isPlugEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
+                    // never push straight back out of the side we were fed through
+                    if (plugBe == this && plugSide == inputSide) continue;
+                    IEnergyStorage dst = plugBe.getAttachedNeighborHandler(plugSide, networkKey);
+                    if (dst == null || !dst.canReceive()) continue;
 
-                int accepted = dst.receiveEnergy(left, simulate);
-                if (accepted <= 0) continue;
+                    int accepted = dst.receiveEnergy(left, simulate);
+                    if (accepted <= 0) continue;
 
-                moved += accepted;
-                left -= accepted;
+                    moved += accepted;
+                    left -= accepted;
 
-                if (!simulate) {
-                    rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % plugs.size();
-                    setChanged();
-                    pendingReceivedFe += accepted;
-                    plugBe.pendingSentFe += accepted;
+                    if (!simulate) {
+                        rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % plugs.size();
+                        setChanged();
+                        pendingReceivedFe += accepted;
+                        plugBe.pendingSentFe += accepted;
+                    }
+
+                    if (left <= 0) break;
                 }
-
-                if (left <= 0) break;
             }
-        }
 
-        return moved;
+            return moved;
+        } finally {
+            NetworkTransferGuard.exit(NetworkTransferGuard.Domain.ENERGY, networkKey);
+        }
     }
 
     private int extractFromNetwork(Direction outputSide, int amount, boolean simulate) {
         if (amount <= 0 || !isPlugEnabled(outputSide) || !(level instanceof ServerLevel sl)) return 0;
-
-        QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
         int networkKey = getNetworkKey(outputSide);
-        List<QuickLinkEnergyNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
-        if (points.isEmpty()) return 0;
+        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.ENERGY, networkKey)) return 0;
+        try {
+            QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
+            List<QuickLinkEnergyNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
+            if (points.isEmpty()) return 0;
 
-        int moved = 0;
-        int left = amount;
-        int start = rrIndexBySide[dirIndex(outputSide)];
+            int moved = 0;
+            int left = amount;
+            int start = rrIndexBySide[dirIndex(outputSide)];
 
-        for (int i = 0; i < points.size() && left > 0; i++) {
-            int idx = (start + i) % points.size();
-            QuickLinkEnergyNetworkManager.GlobalPosRef ref = points.get(idx);
-            ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
-            if (pointLevel == null) continue;
+            for (int i = 0; i < points.size() && left > 0; i++) {
+                int idx = (start + i) % points.size();
+                QuickLinkEnergyNetworkManager.GlobalPosRef ref = points.get(idx);
+                ServerLevel pointLevel = sl.getServer().getLevel(ref.dimension());
+                if (pointLevel == null) continue;
 
-            BlockEntity other = pointLevel.getBlockEntity(ref.pos());
-            if (!(other instanceof EnergyPlugBlockEntity pointBe) || !pointBe.enabled) continue;
+                BlockEntity other = pointLevel.getBlockEntity(ref.pos());
+                if (!(other instanceof EnergyPlugBlockEntity pointBe) || !pointBe.enabled) continue;
 
-            for (Direction pointSide : Direction.values()) {
-                if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
+                for (Direction pointSide : Direction.values()) {
+                    if (!pointBe.isPointEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
 
-                IEnergyStorage src = pointBe.getAttachedNeighborHandler(pointSide);
-                if (src == null || !src.canExtract()) continue;
+                    // never source from the very side that is being drained
+                    if (pointBe == this && pointSide == outputSide) continue;
 
-                int extracted = src.extractEnergy(left, simulate);
-                if (extracted <= 0) continue;
+                    IEnergyStorage src = pointBe.getAttachedNeighborHandler(pointSide, networkKey);
+                    if (src == null || !src.canExtract()) continue;
 
-                moved += extracted;
-                left -= extracted;
+                    int extracted = src.extractEnergy(left, simulate);
+                    if (extracted <= 0) continue;
 
-                if (!simulate) {
-                    rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % points.size();
-                    setChanged();
-                    pendingSentFe += extracted;
-                    pointBe.pendingReceivedFe += extracted;
+                    moved += extracted;
+                    left -= extracted;
+
+                    if (!simulate) {
+                        rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % points.size();
+                        setChanged();
+                        pendingSentFe += extracted;
+                        pointBe.pendingReceivedFe += extracted;
+                    }
+
+                    if (left <= 0) break;
                 }
-
-                if (left <= 0) break;
             }
-        }
 
-        return moved;
+            return moved;
+        } finally {
+            NetworkTransferGuard.exit(NetworkTransferGuard.Domain.ENERGY, networkKey);
+        }
     }
 
     private void tryTransferOnce(ServerLevel sl, Direction plugSide, int amountFE) {
-        IEnergyStorage dst = getAttachedNeighborHandler(plugSide);
-        if (dst == null) return;
-
-        QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
         int networkKey = getNetworkKey(plugSide);
+        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.ENERGY, networkKey)) return;
+        try {
+            IEnergyStorage dst = getAttachedNeighborHandler(plugSide, networkKey);
+            if (dst == null) return;
 
-        List<QuickLinkEnergyNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
-        if (points.isEmpty()) return;
+            QuickLinkEnergyNetworkManager mgr = QuickLinkEnergyNetworkManager.get(sl);
 
-        int pIdx = dirIndex(plugSide);
-        int start = rrIndexBySide[pIdx] % points.size();
+            List<QuickLinkEnergyNetworkManager.GlobalPosRef> points = mgr.getPointsSnapshot(networkKey);
+            if (points.isEmpty()) return;
 
-        // Resolve points lazily in round-robin order and stop at the first one that moves energy.
-        // getBlockEntity() force-loads the target chunk, so collecting every source up front would
-        // load one chunk per network member on every attempt, across every dimension involved.
-        for (int i = 0; i < points.size(); i++) {
-            int idx = (start + i) % points.size();
-            QuickLinkEnergyNetworkManager.GlobalPosRef ref = points.get(idx);
-            ServerLevel pl = sl.getServer().getLevel(ref.dimension());
-            if (pl == null) continue;
-            BlockEntity be = pl.getBlockEntity(ref.pos());
-            if (!(be instanceof EnergyPlugBlockEntity pBe) || !pBe.enabled) continue;
-            for (Direction d : Direction.values()) {
-                if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
-                IEnergyStorage src = pBe.getAttachedNeighborHandler(d);
-                if (src == null) continue;
+            int pIdx = dirIndex(plugSide);
+            int start = rrIndexBySide[pIdx] % points.size();
 
-                int moved = moveEnergy(src, dst, amountFE);
-                if (moved > 0) {
-                    rrIndexBySide[pIdx] = (idx + 1) % points.size();
-                    setChanged();
-                    pBe.pendingReceivedFe += moved;
-                    pendingSentFe += moved;
-                    return;
+            // Resolve points lazily in round-robin order and stop at the first one that moves energy.
+            // getBlockEntity() force-loads the target chunk, so collecting every source up front would
+            // load one chunk per network member on every attempt, across every dimension involved.
+            for (int i = 0; i < points.size(); i++) {
+                int idx = (start + i) % points.size();
+                QuickLinkEnergyNetworkManager.GlobalPosRef ref = points.get(idx);
+                ServerLevel pl = sl.getServer().getLevel(ref.dimension());
+                if (pl == null) continue;
+                BlockEntity be = pl.getBlockEntity(ref.pos());
+                if (!(be instanceof EnergyPlugBlockEntity pBe) || !pBe.enabled) continue;
+                for (Direction d : Direction.values()) {
+                    if (!pBe.isPointEnabled(d) || pBe.getNetworkKey(d) != networkKey) continue;
+                    // the side we are feeding cannot also be the source for that same push
+                    if (pBe == this && d == plugSide) continue;
+                    IEnergyStorage src = pBe.getAttachedNeighborHandler(d, networkKey);
+                    if (src == null) continue;
+
+                    int moved = moveEnergy(src, dst, amountFE);
+                    if (moved > 0) {
+                        rrIndexBySide[pIdx] = (idx + 1) % points.size();
+                        setChanged();
+                        pBe.pendingReceivedFe += moved;
+                        pendingSentFe += moved;
+                        return;
+                    }
                 }
             }
-        }
 
-        rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % points.size();
-        setChanged();
+            rrIndexBySide[pIdx] = (rrIndexBySide[pIdx] + 1) % points.size();
+            setChanged();
+        } finally {
+            NetworkTransferGuard.exit(NetworkTransferGuard.Domain.ENERGY, networkKey);
+        }
     }
 
     @Nullable
-    private IEnergyStorage getAttachedNeighborHandler(Direction side) {
+    private IEnergyStorage getAttachedNeighborHandler(Direction side, int excludeNetworkKey) {
+        Direction face = side.getOpposite();
+        // A plug facing us on the network we are already serving is not an endpoint, it is the same
+        // network seen from the other side: routing into it can only come back to us. Plugs publish
+        // their sides as ordinary capabilities, so the lookup below would happily return one.
+        if (level.getBlockEntity(worldPosition.relative(side)) instanceof EnergyPlugBlockEntity plug
+                && plug.isSideEnabled(face)
+                && plug.getRole(face) != SideRole.NONE
+                && plug.getNetworkKey(face) == excludeNetworkKey) return null;
         BlockCapabilityCache<IEnergyStorage, Direction> cache = neighborCaches[dirIndex(side)];
         return cache != null
             ? cache.getCapability()
-            : level.getCapability(Capabilities.EnergyStorage.BLOCK, worldPosition.relative(side), side.getOpposite());
+            : level.getCapability(Capabilities.EnergyStorage.BLOCK, worldPosition.relative(side), face);
     }
 
     private static int moveEnergy(IEnergyStorage src, IEnergyStorage dst, int amountFE) {

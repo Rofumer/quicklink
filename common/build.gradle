@@ -2,10 +2,26 @@ architectury {
     common rootProject.enabled_platforms.split(',')
 }
 
+repositories {
+    mavenCentral()
+}
+
 dependencies {
     modImplementation "net.fabricmc:fabric-loader:$rootProject.fabric_loader_version"
 
     // Architectury is only needed at compile time for annotation processing.
     // It is NOT bundled into the output jar — users don't need it installed.
     compileOnly "dev.architectury:architectury:$rootProject.architectury_api_version"
+}
+
+// Unit tests for the loader-independent parts of the mod (no Minecraft classes involved)
+dependencies {
+    testImplementation platform("org.junit:junit-bom:${rootProject.junit_version}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+    testLogging { events 'passed', 'skipped', 'failed' }
 }
