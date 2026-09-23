@@ -22,6 +22,10 @@ sourceSets {
             srcDirs 'common/src/main/resources', 'neoforge/src/main/resources'
         }
     }
+    // Unit tests for the loader-independent parts of the mod (no Minecraft classes involved)
+    test {
+        java { srcDirs 'common/src/test/java' }
+    }
 }
 
 java {
@@ -32,6 +36,7 @@ java {
 }
 
 repositories {
+    mavenCentral()
     maven {
         name = 'Modrinth'
         url = 'https://api.modrinth.com/maven'
@@ -51,6 +56,10 @@ repositories {
 }
 
 dependencies {
+    testImplementation platform("org.junit:junit-bom:${rootProject.junit_version}")
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
     // Jade (hover-tooltip overlay mod, optional at runtime)
     compileOnly("maven.modrinth:jade:${rootProject.jade_version}") { transitive = false }
     // WTHIT (What The Hell Is That, optional at runtime)
@@ -102,4 +111,9 @@ publishing {
             from components.java
         }
     }
+}
+
+test {
+    useJUnitPlatform()
+    testLogging { events 'passed', 'skipped', 'failed' }
 }
