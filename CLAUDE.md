@@ -123,18 +123,54 @@ public void onLoad() {
     }
 }
 
-// Access via instance method (NOT a static helper):
+// Access via instance method (NOT a static helper). The network key is required: a neighbour
+// plug on that same network is not an endpoint, it is the network seen from the other side.
 @Nullable
-private HandlerType getAttachedNeighborHandler(Direction side) {
+private HandlerType getAttachedNeighborHandler(Direction side, int excludeNetworkKey) {
+    Direction face = side.getOpposite();
+    if (level.getBlockEntity(worldPosition.relative(side)) instanceof ThisBE plug
+            && plug.isSideEnabled(face)
+            && plug.getRole(face) != SideRole.NONE
+            && plug.getNetworkKey(face) == excludeNetworkKey) return null;
     BlockCapabilityCache<HandlerType, Direction> cache = neighborCaches[dirIndex(side)];
     return cache != null ? cache.getCapability()
-        : level.getCapability(Capabilities.X.BLOCK, worldPosition.relative(side), side.getOpposite());
+        : level.getCapability(Capabilities.X.BLOCK, worldPosition.relative(side), face);
 }
 ```
 
-Network iteration uses `record Src(BEType be, Direction dir)` so that `s.be().getAttachedNeighborHandler(s.dir())` goes through the owning BE's own cache.
+Network iteration uses `record Src(BEType be, Direction dir)` so that `s.be().getAttachedNeighborHandler(s.dir(), key)` goes through the owning BE's own cache.
 
-**FluidPlugBE specifics:** `getCachedNeighborFluidHandler(Direction)` checks if the neighbor is itself a `FluidPlugBlockEntity` first (peer-to-peer path), then falls through to the cache. Returns `IFluidHandler.of(rh)` wrapper.
+**FluidPlugBE specifics:** `getCachedNeighborFluidHandler(Direction, int)` checks if the neighbor is itself a `FluidPlugBlockEntity` first (peer-to-peer path), then falls through to the cache. Returns `IFluidHandler.of(rh)` wrapper.
+
+## Network Loop Guard
+
+Plug sides are published as ordinary capabilities, so `level.getCapability(...)` on a neighbouring
+plug hands back that plug's own side handler. Before 1.1.18 a network routed back into itself —
+plug next to plug, or a pipe leading back to another plug of the same colour/team — recursed until
+the game died with a `StackOverflowError`.
+
+`common/.../NetworkTransferGuard.java` is a stack-scoped, thread-local set of network keys, qualified
+by domain (`ITEM`, `FLUID`, `ENERGY`) so the three graphs never block each other. Every traversal —
+`receiveIntoNetwork`/`fillIntoNetwork`, `extractFromNetwork`/`drainFromNetwork`, `tryPushOnce`/
+`tryTransferOnce`, `peekNetworkFluid` — does:
+
+```java
+int networkKey = getNetworkKey(side);
+if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.ITEM, networkKey)) return 0;
+try {
+    ...
+} finally {
+    NetworkTransferGuard.exit(NetworkTransferGuard.Domain.ITEM, networkKey);
+}
+```
+
+**Key rule:** the guard is scoped to the call stack, never to a tick. A simulated pass and the
+committed pass that follows it run at the same depth and must get the same answer — never make the
+guard stateful across calls. Traversals also skip the side they were just fed through
+(`pBe == this && d == side`); other sides of the same plug stay valid targets.
+
+Unit-tested in `common/src/test/java/.../NetworkTransferGuardTest.java` (`./gradlew test`) — the
+fakes there reproduce the crash shape without Minecraft.
 
 ## Jade / WTHIT Tooltip Compat
 
