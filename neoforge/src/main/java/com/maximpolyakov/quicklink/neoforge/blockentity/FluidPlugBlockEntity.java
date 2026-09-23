@@ -22,10 +22,11 @@ import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.neoforged.neoforge.capabilities.BlockCapabilityCache;
 import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.fluids.FluidStack;
-import net.neoforged.neoforge.fluids.capability.IFluidHandler;
 import net.neoforged.neoforge.transfer.ResourceHandler;
+import net.neoforged.neoforge.transfer.ResourceHandlerUtil;
+import net.neoforged.neoforge.transfer.resource.ResourceStack;
 import net.neoforged.neoforge.transfer.fluid.FluidResource;
+import net.neoforged.neoforge.transfer.transaction.Transaction;
 import net.neoforged.neoforge.transfer.transaction.TransactionContext;
 import org.jetbrains.annotations.Nullable;
 
@@ -335,8 +336,8 @@ public class FluidPlugBlockEntity extends BlockEntity {
         return sideCapabilities[dirIndex(side)];
     }
 
-    int fillIntoNetwork(Direction inputSide, FluidStack resource, IFluidHandler.FluidAction action) {
-        if (resource.isEmpty() || !isPointEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
+    int fillIntoNetwork(Direction inputSide, FluidResource resource, int amount, TransactionContext ctx) {
+        if (resource.isEmpty() || amount <= 0 || !isPointEnabled(inputSide) || !(level instanceof ServerLevel sl)) return 0;
         int networkKey = getNetworkKey(inputSide);
         // A plug side is a plain capability handler, so a transfer can be routed back into a
         // network that is already being walked further down this call stack. Claim the key for
@@ -348,7 +349,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
             if (points.isEmpty()) return 0;
 
             int moved = 0;
-            int left = resource.getAmount();
+            int left = amount;
             int start = rrIndexBySide[dirIndex(inputSide)];
 
             for (int i = 0; i < points.size() && left > 0; i++) {
@@ -364,20 +365,16 @@ public class FluidPlugBlockEntity extends BlockEntity {
                     if (!pointBe.isPlugEnabled(pointSide) || pointBe.getNetworkKey(pointSide) != networkKey) continue;
                     // never push straight back out of the side we were filled through
                     if (pointBe == this && pointSide == inputSide) continue;
-                    IFluidHandler dst = pointBe.getCachedNeighborFluidHandler(pointSide, networkKey);
+                    ResourceHandler<FluidResource> dst = pointBe.getCachedNeighborFluidHandler(pointSide, networkKey);
                     if (dst == null) continue;
 
-                    FluidStack toFill = resource.copy();
-                    toFill.setAmount(left);
-                    int accepted = dst.fill(toFill, action);
+                    int accepted = dst.insert(resource, left, ctx);
                     if (accepted <= 0) continue;
 
                     moved += accepted;
                     left -= accepted;
-                    if (action.execute()) {
-                        rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % points.size();
-                        setChanged();
-                    }
+                    rrIndexBySide[dirIndex(inputSide)] = (idx + 1) % points.size();
+                    setChanged();
                     if (left <= 0) break;
                 }
             }
@@ -387,14 +384,15 @@ public class FluidPlugBlockEntity extends BlockEntity {
         }
     }
 
-    FluidStack drainFromNetwork(Direction outputSide, int amount, @Nullable FluidStack match, IFluidHandler.FluidAction action) {
-        if (amount <= 0 || !isPlugEnabled(outputSide) || !(level instanceof ServerLevel sl)) return FluidStack.EMPTY;
+    /** @param match the resource the caller wants, or {@link FluidResource#EMPTY} for whatever the network has. */
+    int drainFromNetwork(Direction outputSide, FluidResource match, int amount, TransactionContext ctx) {
+        if (amount <= 0 || !isPlugEnabled(outputSide) || !(level instanceof ServerLevel sl)) return 0;
         int networkKey = getNetworkKey(outputSide);
-        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.FLUID, networkKey)) return FluidStack.EMPTY;
+        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.FLUID, networkKey)) return 0;
         try {
             QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
             List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
-            if (plugs.isEmpty()) return FluidStack.EMPTY;
+            if (plugs.isEmpty()) return 0;
 
             int start = rrIndexBySide[dirIndex(outputSide)];
 
@@ -414,41 +412,39 @@ public class FluidPlugBlockEntity extends BlockEntity {
                     if (plugBe == this && plugSide == outputSide) continue;
 
                     if (plugBe.isInfiniteWater(plugSide)) {
-                        if (match != null && !match.isEmpty() && !match.is(Fluids.WATER)) continue;
-                        FluidStack provided = new FluidStack(Fluids.WATER, amount);
-                        if (action.execute()) {
-                            rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % plugs.size();
-                            setChanged();
-                        }
-                        return provided;
-                    }
-
-                    IFluidHandler src = plugBe.getCachedNeighborFluidHandler(plugSide, networkKey);
-                    if (src == null) continue;
-
-                    FluidStack drained = (match == null)
-                            ? src.drain(amount, action)
-                            : src.drain(match.copyWithAmount(amount), action);
-                    if (drained.isEmpty()) continue;
-
-                    if (action.execute()) {
+                        if (!match.isEmpty() && match.getFluid() != Fluids.WATER) continue;
                         rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % plugs.size();
                         setChanged();
+                        return amount;
                     }
+
+                    ResourceHandler<FluidResource> src = plugBe.getCachedNeighborFluidHandler(plugSide, networkKey);
+                    if (src == null) continue;
+
+                    int drained = match.isEmpty() ? extractAny(src, amount, ctx) : src.extract(match, amount, ctx);
+                    if (drained <= 0) continue;
+
+                    rrIndexBySide[dirIndex(outputSide)] = (idx + 1) % plugs.size();
+                    setChanged();
                     return drained;
                 }
             }
-            return FluidStack.EMPTY;
+            return 0;
         } finally {
             NetworkTransferGuard.exit(NetworkTransferGuard.Domain.FLUID, networkKey);
         }
+    }
+
+    private static int extractAny(ResourceHandler<FluidResource> src, int amount, TransactionContext ctx) {
+        FluidResource found = ResourceHandlerUtil.findExtractableResource(src, r -> true, ctx);
+        return found == null ? 0 : src.extract(found, amount, ctx);
     }
 
     private int tryTransferOnce(ServerLevel sl, Direction plugSide, int amountMB) {
         int networkKey = getNetworkKey(plugSide);
         if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.FLUID, networkKey)) return 0;
         try {
-            IFluidHandler dst = getCachedNeighborFluidHandler(plugSide, networkKey);
+            ResourceHandler<FluidResource> dst = getCachedNeighborFluidHandler(plugSide, networkKey);
             if (dst == null) return 0;
 
             QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
@@ -477,7 +473,7 @@ public class FluidPlugBlockEntity extends BlockEntity {
                     if (pBe.isInfiniteWater(d)) {
                         moved = pushInfiniteWater(dst, pBe, d);
                     } else {
-                        IFluidHandler src = pBe.getCachedNeighborFluidHandler(d, networkKey);
+                        ResourceHandler<FluidResource> src = pBe.getCachedNeighborFluidHandler(d, networkKey);
                         if (src == null) continue;
                         moved = moveFluidAny(src, dst, amountMB);
                     }
@@ -498,32 +494,38 @@ public class FluidPlugBlockEntity extends BlockEntity {
         }
     }
 
-    private static int pushInfiniteWater(@Nullable IFluidHandler dst, FluidPlugBlockEntity plugBe, Direction pointSide) {
+    private static int pushInfiniteWater(@Nullable ResourceHandler<FluidResource> dst, FluidPlugBlockEntity plugBe, Direction pointSide) {
         int idx = dirIndex(pointSide);
-        long rateMb = plugBe.effectiveInfiniteMbPerTick();
-        int maxChunk = plugBe.effectiveInfiniteMaxPush();
-        plugBe.waterAccumBySide[idx] += rateMb;
+        plugBe.waterAccumBySide[idx] += plugBe.effectiveInfiniteMbPerTick();
 
         if (dst == null) return 0;
-        FluidStack probe = new FluidStack(Fluids.WATER, 1);
-        if (dst.fill(probe, IFluidHandler.FluidAction.SIMULATE) <= 0) return 0;
 
+        long accumulated = plugBe.waterAccumBySide[idx];
+        int maxChunk = plugBe.effectiveInfiniteMaxPush();
         int totalMoved = 0;
-        for (int i = 0; i < 8; i++) {
-            int toMove = (int) Math.min(plugBe.waterAccumBySide[idx], maxChunk);
-            if (toMove <= 0) break;
-            FluidStack water = new FluidStack(Fluids.WATER, toMove);
-            int filled = dst.fill(water, IFluidHandler.FluidAction.EXECUTE);
-            if (filled <= 0) break;
-            plugBe.waterAccumBySide[idx] -= filled;
-            totalMoved += filled;
+
+        // The accumulator is only charged once the insert is committed, so a rolled back
+        // transaction leaves the plug exactly as it was.
+        try (Transaction tx = Transaction.openRoot()) {
+            for (int i = 0; i < 8; i++) {
+                int toMove = (int) Math.min(accumulated - totalMoved, maxChunk);
+                if (toMove <= 0) break;
+                int filled = dst.insert(FluidResource.of(Fluids.WATER), toMove, tx);
+                if (filled <= 0) break;
+                totalMoved += filled;
+            }
+            if (totalMoved > 0) tx.commit();
         }
-        if (totalMoved > 0) plugBe.setChanged();
+
+        if (totalMoved > 0) {
+            plugBe.waterAccumBySide[idx] = accumulated - totalMoved;
+            plugBe.setChanged();
+        }
         return totalMoved;
     }
 
     @Nullable
-    private IFluidHandler getCachedNeighborFluidHandler(Direction side, int excludeNetworkKey) {
+    private ResourceHandler<FluidResource> getCachedNeighborFluidHandler(Direction side, int excludeNetworkKey) {
         BlockPos target = worldPosition.relative(side);
         Direction targetFace = side.getOpposite();
         BlockEntity be = level.getBlockEntity(target);
@@ -532,41 +534,32 @@ public class FluidPlugBlockEntity extends BlockEntity {
             // the same network seen from the other side: routing into it can only come back to us.
             if (plug.isSideEnabled(targetFace) && plug.getRole(targetFace) != SideRole.NONE
                     && plug.getNetworkKey(targetFace) == excludeNetworkKey) return null;
-            ResourceHandler<FluidResource> rh = plug.getExternalFluidHandler(targetFace);
-            return rh != null ? IFluidHandler.of(rh) : null;
+            return plug.getExternalFluidHandler(targetFace);
         }
         BlockCapabilityCache<ResourceHandler<FluidResource>, Direction> cache = neighborCaches[dirIndex(side)];
-        ResourceHandler<FluidResource> rh = cache != null
+        return cache != null
             ? cache.getCapability()
             : level.getCapability(Capabilities.Fluid.BLOCK, target, targetFace);
-        return rh != null ? IFluidHandler.of(rh) : null;
     }
 
-    private static int moveFluidAny(IFluidHandler src, @Nullable IFluidHandler dst, int amountMB) {
+    private static int moveFluidAny(ResourceHandler<FluidResource> src, @Nullable ResourceHandler<FluidResource> dst, int amountMB) {
         if (amountMB <= 0 || dst == null) return 0;
-
-        FluidStack canDrain = src.drain(amountMB, IFluidHandler.FluidAction.SIMULATE);
-        if (canDrain.isEmpty() || canDrain.getAmount() <= 0) return 0;
-
-        int canFill = dst.fill(canDrain, IFluidHandler.FluidAction.SIMULATE);
-        if (canFill <= 0) return 0;
-
-        int toMove = Math.min(canDrain.getAmount(), canFill);
-        if (toMove <= 0) return 0;
-
-        FluidStack drained = src.drain(toMove, IFluidHandler.FluidAction.EXECUTE);
-        if (drained.isEmpty() || drained.getAmount() <= 0) return 0;
-
-        return dst.fill(drained, IFluidHandler.FluidAction.EXECUTE);
+        // A null transaction makes moveFirst open a root one and commit it only if anything moved.
+        ResourceStack<FluidResource> moved = ResourceHandlerUtil.moveFirst(src, dst, r -> true, amountMB, null);
+        return moved == null ? 0 : moved.amount();
     }
 
-    private FluidStack peekNetworkFluid(Direction outputSide) {
-        if (!isPlugEnabled(outputSide) || !(level instanceof ServerLevel sl)) return FluidStack.EMPTY;
+    private FluidResource peekNetworkFluid(Direction outputSide) {
+        if (!isPlugEnabled(outputSide) || !(level instanceof ServerLevel sl)) return FluidResource.EMPTY;
         int networkKey = getNetworkKey(outputSide);
-        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.FLUID, networkKey)) return FluidStack.EMPTY;
+        if (!NetworkTransferGuard.enter(NetworkTransferGuard.Domain.FLUID, networkKey)) return FluidResource.EMPTY;
         try {
             QuickLinkFluidNetworkManager mgr = QuickLinkFluidNetworkManager.get(sl);
             List<QuickLinkFluidNetworkManager.GlobalPosRef> plugs = mgr.getPlugsSnapshot(networkKey);
+            // getResource() has no transaction of its own, so hand the probe whichever one the
+            // caller already has open; findExtractableResource nests inside it and rolls back.
+            @SuppressWarnings("deprecation")
+            TransactionContext outer = Transaction.getCurrentOpenedTransaction();
 
             for (QuickLinkFluidNetworkManager.GlobalPosRef ref : plugs) {
                 ServerLevel plugLevel = sl.getServer().getLevel(ref.dimension());
@@ -576,14 +569,14 @@ public class FluidPlugBlockEntity extends BlockEntity {
                 for (Direction plugSide : Direction.values()) {
                     if (!plugBe.isPointEnabled(plugSide) || plugBe.getNetworkKey(plugSide) != networkKey) continue;
                     if (plugBe == this && plugSide == outputSide) continue;
-                    if (plugBe.isInfiniteWater(plugSide)) return new FluidStack(Fluids.WATER, 1);
-                    IFluidHandler src = plugBe.getCachedNeighborFluidHandler(plugSide, networkKey);
+                    if (plugBe.isInfiniteWater(plugSide)) return FluidResource.of(Fluids.WATER);
+                    ResourceHandler<FluidResource> src = plugBe.getCachedNeighborFluidHandler(plugSide, networkKey);
                     if (src == null) continue;
-                    FluidStack simulated = src.drain(1, IFluidHandler.FluidAction.SIMULATE);
-                    if (!simulated.isEmpty()) return simulated;
+                    FluidResource found = ResourceHandlerUtil.findExtractableResource(src, r -> true, outer);
+                    if (found != null) return found;
                 }
             }
-            return FluidStack.EMPTY;
+            return FluidResource.EMPTY;
         } finally {
             NetworkTransferGuard.exit(NetworkTransferGuard.Domain.FLUID, networkKey);
         }
@@ -603,16 +596,13 @@ public class FluidPlugBlockEntity extends BlockEntity {
 
         @Override
         public FluidResource getResource(int slot) {
-            if (slot != 0) return FluidResource.EMPTY;
-            FluidStack peek = owner.peekNetworkFluid(side);
-            return peek.isEmpty() ? FluidResource.EMPTY : FluidResource.of(peek);
+            return slot != 0 ? FluidResource.EMPTY : owner.peekNetworkFluid(side);
         }
 
         @Override
         public long getAmountAsLong(int slot) {
             if (slot != 0) return 0L;
-            FluidStack peek = owner.peekNetworkFluid(side);
-            return peek.isEmpty() ? 0L : Integer.MAX_VALUE;
+            return owner.peekNetworkFluid(side).isEmpty() ? 0L : Integer.MAX_VALUE;
         }
 
         @Override
@@ -626,16 +616,13 @@ public class FluidPlugBlockEntity extends BlockEntity {
         @Override
         public int insert(int slot, FluidResource resource, int maxAmount, TransactionContext ctx) {
             if (slot != 0 || resource.isEmpty() || maxAmount <= 0) return 0;
-            FluidStack stack = resource.toStack(maxAmount);
-            return owner.fillIntoNetwork(side, stack, IFluidHandler.FluidAction.EXECUTE);
+            return owner.fillIntoNetwork(side, resource, maxAmount, ctx);
         }
 
         @Override
         public int extract(int slot, FluidResource resource, int maxAmount, TransactionContext ctx) {
             if (slot != 0 || maxAmount <= 0) return 0;
-            FluidStack match = resource.isEmpty() ? null : resource.toStack(maxAmount);
-            FluidStack drained = owner.drainFromNetwork(side, maxAmount, match, IFluidHandler.FluidAction.EXECUTE);
-            return drained.getAmount();
+            return owner.drainFromNetwork(side, resource, maxAmount, ctx);
         }
     }
 

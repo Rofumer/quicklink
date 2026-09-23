@@ -11,8 +11,8 @@ Each plug has a **role** (PLUG = source, POINT = destination) and a **color** fo
 
 ## Branch & Version
 
-- **Active migration branch:** `migration/mc-26.1.2`
-- **Target:** MC 26.1.2 / NeoForge 26.1.2.48-beta
+- **Active migration branch:** `migration/mc-26.3`
+- **Target:** MC 26.3 / NeoForge 26.3.0.12-beta (ModDevGradle 2.0.147 — 2.0.141 cannot recompile the 26.3 Minecraft sources)
 - **Main branch:** `master` (still MC 1.21.1)
 
 ## Project Structure
@@ -45,7 +45,7 @@ QuickLink/
 | `neoforge/.../client/QuickLinkHudOverlay.java` | HUD layer: shows upgrade tier when looking at plug block |
 | `neoforge/.../network/QuickLink{Item,Fluid,Energy}NetworkManager.java` | `SavedData` with Codec — persists plug networks per world |
 
-## MC 26.1.2 API Changes (vs 1.21.1)
+## MC 26.x API Changes (vs 1.21.1)
 
 ### Registration
 ```java
@@ -84,6 +84,22 @@ level.getDataStorage().computeIfAbsent(TYPE);  // no factory lambda
 - `@EventBusSubscriber` lost `bus=` param — FML 11 auto-routes by `IModBusEvent`
 - `BlockItem.getDescriptionId()` returns `item.*` not `block.*`
 
+### MC 26.3 specifics
+
+- **Block codecs are gone.** `simpleCodec(...)` and `codec()` no longer exist on `Block`; the
+  `MapCodec` field and its override were deleted from all three plug blocks.
+- **`spawnDestroyParticles` lost its `Player`.** It is now `(Level, BlockPos, BlockState)`, and the
+  entity-aware variant to override is `spawnDestroyByEntityParticles(Level, @Nullable Entity, BlockPos, BlockState)`.
+- **The legacy fluid bridge is gone.** `net.neoforged.neoforge.fluids.capability.IFluidHandler` and
+  `IFluidHandler.of(ResourceHandler)` were removed in NeoForge 26.3, so `FluidPlugBlockEntity` now
+  speaks `ResourceHandler<FluidResource>` end to end: `insert`/`extract` with the caller's
+  `TransactionContext` instead of `fill`/`drain` with a `FluidAction`. Consequence worth knowing:
+  the side handler now honours the caller's transaction — before, a simulated insert moved fluid
+  for real, because the bridge always passed `EXECUTE`.
+- Probing without a transaction of your own (e.g. `ResourceHandler.getResource`) goes through
+  `ResourceHandlerUtil.findExtractableResource(handler, filter, Transaction.getCurrentOpenedTransaction())`;
+  passing `null` there throws if the thread already has a transaction open.
+
 ### Resources
 - Recipe ingredients: `{"item":"minecraft:X"}` → `"minecraft:X"`
 - Item models: need `assets/<ns>/items/<name>.json` → `{"model":{"type":"minecraft:model","model":"..."}}`
@@ -92,7 +108,7 @@ level.getDataStorage().computeIfAbsent(TYPE);  // no factory lambda
 ## Build Notes
 
 ```bash
-./gradlew build          # produces build/libs/QuickLink-1.0.9-26.1.2.jar
+./gradlew build          # produces build/libs/QuickLink-1.1.18-26.3.jar
 ./gradlew runClient      # dev client (run/ dir)
 ./gradlew compileJava    # fast compile check
 ```
@@ -183,7 +199,9 @@ Optional runtime integrations live in `neoforge/.../compat/`. Both are `compileO
 
 ## Open Issues
 
-None. Migration to MC 26.1.2 is complete. ItemPlug tested in-game. Fluid and Energy plugs pending full test.
+Migration to MC 26.3 builds and unit-tests clean, but nothing on this branch has been run in-game yet.
+FTB Teams/Chunks have no 26.2+ release; the branch still compiles against the 26.1.2 jars (compileOnly,
+optional at runtime), so the team/claim integration is untested on 26.3.
 
 ## Conventions
 

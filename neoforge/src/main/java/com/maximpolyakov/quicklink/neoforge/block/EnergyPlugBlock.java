@@ -6,7 +6,6 @@ import com.maximpolyakov.quicklink.neoforge.QuickLinkNeoForge;
 import com.maximpolyakov.quicklink.neoforge.UpgradeTier;
 import com.maximpolyakov.quicklink.neoforge.blockentity.EnergyPlugBlockEntity;
 import com.maximpolyakov.quicklink.neoforge.item.QuickLinkUpgradeItem;
-import com.mojang.serialization.MapCodec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
@@ -17,6 +16,7 @@ import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.DyeItem;
@@ -42,16 +42,10 @@ import java.util.List;
 
 public class EnergyPlugBlock extends BaseEntityBlock {
 
-    public static final MapCodec<EnergyPlugBlock> CODEC = simpleCodec(EnergyPlugBlock::new);
     private static final VoxelShape SHAPE = box(6.0, 6.0, 6.0, 10.0, 10.0, 10.0);
 
     public EnergyPlugBlock(Properties props) {
         super(props);
-    }
-
-    @Override
-    protected MapCodec<? extends BaseEntityBlock> codec() {
-        return CODEC;
     }
 
     @Override
@@ -199,8 +193,8 @@ public class EnergyPlugBlock extends BaseEntityBlock {
     }
 
     @Override
-    public void spawnDestroyParticles(Level level, Player player, BlockPos pos, BlockState state) {
-        level.levelEvent(player, 2001, pos, Block.getId(Blocks.CONCRETE.pick(DyeColor.RED).defaultBlockState()));
+    public void spawnDestroyByEntityParticles(Level level, @Nullable Entity entity, BlockPos pos, BlockState state) {
+        level.levelEvent(entity, 2001, pos, Block.getId(Blocks.CONCRETE.pick(DyeColor.RED).defaultBlockState()));
     }
 
     private static int quadSlotFromHit(Direction face, double lx, double ly, double lz) {
